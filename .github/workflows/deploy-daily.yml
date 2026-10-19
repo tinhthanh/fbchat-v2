@@ -1,0 +1,52 @@
+# Fork-only: kiểm tra deploy/ hằng ngày, cả trên code fork lẫn sau khi merge thử upstream,
+# để phát hiện sớm thay đổi upstream làm vỡ multi_main/gateway_link (contract test).
+name: deploy-daily
+
+on:
+  push:
+    branches: [main]
+    paths: ["deploy/**", "src/**", ".github/workflows/deploy-daily.yml"]
+  schedule:
+    - cron: "0 0 * * *" # 07:00 giờ Việt Nam
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [fork, upstream-merge]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge thử upstream/main (không push)
+        if: matrix.variant == 'upstream-merge'
+        run: |
+          git remote add upstream https://github.com/m008v/fbchat-v2.git
+          git fetch --quiet upstream main
+          echo "upstream mới hơn fork: $(git rev-list --count HEAD..upstream/main) commit"
+          git -c user.name=ci -c user.email=ci@localhost merge --no-edit upstream/main
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cài phụ thuộc
+        run: pip install "httpx>=0.27" "requests>=2.32" "paho-mqtt>=1.6.1" "pyotp>=2.9" pytest pytest-asyncio ruff black
+
+      - name: Test deploy (gồm contract test với upstream)
+        run: pytest -q deploy/tests
+
+      - name: Test upstream
+        run: pytest -q tests
+
+      - name: Lint deploy
+        run: |
+          ruff check deploy
+          black --check deploy
