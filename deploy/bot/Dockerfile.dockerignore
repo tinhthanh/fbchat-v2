@@ -11,6 +11,7 @@ tests
 website
 deploy
 !deploy/multi_main.py
+!deploy/gateway_link.py
 src/config.json
 src/test.py
 .env

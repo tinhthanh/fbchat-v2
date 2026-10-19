@@ -16,6 +16,7 @@ deploy/
 │   ├── Dockerfile
 │   └── Dockerfile.dockerignore # per-Dockerfile ignore file (BuildKit), root untouched
 ├── multi_main.py               # multi-account runner, uses only src/main.py APIs
+├── gateway_link.py             # omnichannel gateway link (when GATEWAY_URL is set)
 └── tests/                      # runner tests + contract tests against upstream
 ```
 
@@ -72,6 +73,18 @@ Environment variables (shell or `.env`): `ACCOUNT`, `FORCE_LOGIN`, `LOGIN_TIMEOU
 - Chromium runs without remote debugging or automation flags; the script reads and decrypts the profile's SQLite `Cookies` file (`--password-store=basic`). Policies disable DevTools and the password manager.
 - Chromium runs with `--no-sandbox` because Docker's default seccomp profile blocks its sandbox; the container is only used to open Facebook.
 - The bot runs as a non-root user with a read-only root FS, `cap_drop: ALL` and `no-new-privileges`. Cookies live in the `fbchat-data` volume, not in the image or the repository.
+
+## 🔗 Omnichannel mode (gateway)
+
+With `GATEWAY_URL` and `GATEWAY_TOKEN` (at least 32 characters) set, `multi_main.py` forwards every customer message to the omnichannel gateway (`POST /v1/inbound`) instead of running `/ping`-style commands, and serves `POST /send` on `BOT_HTTP_PORT` (default 7002) for agent replies. Set `BOT_COMMANDS=1` to keep the commands. The code lives in `gateway_link.py`; the full stack (Libredesk + gateway + bots) lives in a separate `omnichannel/` directory.
+
+- `thread_id` sent to the gateway: `e2ee:<chatJid>` for encrypted chats, `thread:<threadId>` for regular chats; groups are detected from `threadType`.
+- Sender names come from `_get_user_info` and are cached.
+- A reply the bridge does not confirm (deliveryStatus UNKNOWN) still returns 200 so the gateway does not resend it and the customer does not get duplicates.
+
+### E2EE device state
+
+`AccountBot` stores the E2EE device state in `/data/accounts/<name>/e2ee_device.json` (mode `0600`). Upstream keeps it in memory by default (`e2ee_memory_only=True`): every restart becomes a new E2EE device and incoming messages often fail with `E2EE message could not be decrypted or was unavailable`. Set `FBCHAT_E2EE_PERSIST=0` to restore the upstream behaviour. The file holds the account's encryption keys: do not copy it out of the volume.
 
 ## 🔄 Syncing with upstream
 

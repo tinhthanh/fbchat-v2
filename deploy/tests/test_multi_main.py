@@ -66,6 +66,7 @@ def test_upstream_contract_used_by_fork(mock_dataFB: dict[str, Any]) -> None:
 
     listener = listeningE2EEEvent(mock_dataFB)
     assert hasattr(listener, "device_path")
+    assert isinstance(listener.e2ee_memory_only, bool)
     assert isinstance(listener.startup_timeout, float)
     wait_params = inspect.signature(listener.wait_until_connected).parameters
     assert "require_e2ee" in wait_params
@@ -165,6 +166,7 @@ def test_account_bot_sets_device_path_on_listener(
     multi_main.AccountBot(mock_dataFB, account="acc1", device_path="/d/acc1.json")
 
     assert fake_listener.device_path == "/d/acc1.json"
+    assert fake_listener.e2ee_memory_only is False  # trạng thái E2EE được lưu ra file
 
 
 def test_listener_callback_logs_with_account_label(

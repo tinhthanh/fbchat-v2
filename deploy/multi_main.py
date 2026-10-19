@@ -37,6 +37,8 @@ from _core._storage import FileSessionStorage
 from _messaging._listening_e2ee import _format_exception_chain
 from main import DEFAULT_HTTP_TIMEOUT, SimpleBot, is_valid_datafb
 
+from gateway_link import GatewayLink
+
 ACCOUNTS_DIR = Path(
     os.environ.get("FBCHAT_ACCOUNTS_DIR", Path(__file__).resolve().parent / "accounts")
 )
@@ -47,6 +49,16 @@ RETRY_MAX_SECONDS = 600.0
 STABLE_AFTER_SECONDS = 600.0
 # File trạng thái cho Docker healthcheck; healthy khi mọi tài khoản là "running".
 HEALTH_FILE = os.environ.get("FBCHAT_HEALTH_FILE")
+BOT_HTTP_PORT = int(os.environ.get("BOT_HTTP_PORT", "7002"))
+E2EE_PERSIST = os.environ.get("FBCHAT_E2EE_PERSIST", "1").lower() not in {
+    "0",
+    "false",
+    "no",
+}
+# Có GATEWAY_URL: tin khách được chuyển tới omnichannel gateway và lệnh /ping...
+# bị tắt (đặt BOT_COMMANDS=1 để bật lại).
+COMMANDS_FLAG = os.environ.get("BOT_COMMANDS", "").lower() in {"1", "true", "yes"}
+_gateway: GatewayLink | None = None
 
 _account_states: dict[str, str] = {}
 
@@ -97,9 +109,22 @@ class AccountBot(SimpleBot):
     ) -> None:
         super().__init__(dataFB, **options)
         self.account = account
-        # Listener chỉ đọc device_path khi connect; chỉ có tác dụng nếu bật lưu
-        # trạng thái E2EE ra file (e2ee_memory_only=False).
+        # Listener chỉ đọc hai thuộc tính này khi connect. Upstream mặc định giữ
+        # trạng thái E2EE trong RAM: mỗi lần restart là một thiết bị E2EE mới và
+        # tin đến hay báo "could not be decrypted". Lưu ra file (0600) theo tài khoản.
         self.listener.device_path = device_path
+        self.listener.e2ee_memory_only = not E2EE_PERSIST
+
+    async def _dispatch(self, message: dict[str, Any]) -> None:
+        if _gateway is not None:
+            sender_id = str(message.get("userID") or "")
+            if message.get("messageID") and sender_id != str(
+                self.dataFB.get("FacebookID")
+            ):
+                await _gateway.forward(self.account, self, message)
+            if not COMMANDS_FLAG:
+                return
+        await super()._dispatch(message)
 
     def _queue_event(self, event: dict[str, Any]) -> None:
         # call_soon_threadsafe chạy callback trong bản sao context của listener
@@ -173,11 +198,15 @@ async def run_account(
         debug_errors=config["debug_errors"],
         http_client=http_client,
     )
+    if _gateway is not None:
+        await _gateway.register(name, bot)
     ready_task = asyncio.create_task(_notify_when_ready(bot, on_ready))
     try:
         await bot.run()
     finally:
         ready_task.cancel()
+        if _gateway is not None:
+            _gateway.unregister(name, bot)
 
 
 async def _notify_when_ready(
@@ -253,7 +282,11 @@ async def main() -> None:
             f"Không có tài khoản nào trong {ACCOUNTS_DIR} (cần <tên>/config.json)."
         )
     log("multi", f"Chạy {len(accounts)} tài khoản: {', '.join(n for n, _ in accounts)}")
+    global _gateway
     async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+        _gateway = GatewayLink.from_env(http_client, log)
+        if _gateway is not None:
+            await _gateway.serve(BOT_HTTP_PORT)
         results = await asyncio.gather(
             *(
                 supervise_account(name, account_dir, http_client)

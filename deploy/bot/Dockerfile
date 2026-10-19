@@ -28,7 +28,7 @@ WORKDIR /app
 COPY pyproject.toml ./
 COPY src/ ./src/
 # Runner nhiều tài khoản của fork; đặt cạnh main.py để import main.
-COPY deploy/multi_main.py ./src/multi_main.py
+COPY deploy/multi_main.py deploy/gateway_link.py ./src/
 COPY --from=bridge /out/fbchat-bridge-e2ee /app/build/fbchat-bridge-e2ee
 
 USER fbchat

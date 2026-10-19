@@ -16,6 +16,7 @@ deploy/
 │   ├── Dockerfile
 │   └── Dockerfile.dockerignore # ignore file riêng (BuildKit), không đụng thư mục gốc
 ├── multi_main.py               # runner nhiều tài khoản, chỉ dùng API của src/main.py
+├── gateway_link.py             # nối với omnichannel gateway (khi có GATEWAY_URL)
 └── tests/                      # test runner + contract test với upstream
 ```
 
@@ -72,6 +73,18 @@ Biến môi trường (shell hoặc `.env`): `ACCOUNT`, `FORCE_LOGIN`, `LOGIN_TI
 - Chromium không bật remote debugging hay automation flag; script đọc và giải mã file SQLite `Cookies` trong profile (`--password-store=basic`). Policy tắt DevTools và trình quản lý mật khẩu.
 - Chromium chạy với `--no-sandbox` vì seccomp mặc định của Docker chặn sandbox của nó; container chỉ dùng để mở Facebook.
 - Bot chạy user không phải root, root FS read-only, `cap_drop: ALL`, `no-new-privileges`. Cookie nằm trong volume `fbchat-data`, không nằm trong image hay thư mục repo.
+
+## 🔗 Chế độ omnichannel (gateway)
+
+Khi đặt `GATEWAY_URL` và `GATEWAY_TOKEN` (ít nhất 32 ký tự), `multi_main.py` chuyển mọi tin khách sang omnichannel gateway (`POST /v1/inbound`) thay vì chạy lệnh `/ping`..., và mở `POST /send` tại cổng `BOT_HTTP_PORT` (mặc định 7002) để nhận tin nhân viên trả lời. Đặt `BOT_COMMANDS=1` để vẫn chạy lệnh. Code nằm trong `gateway_link.py`; stack đầy đủ (Libredesk + gateway + bot) ở thư mục `omnichannel/` riêng.
+
+- `thread_id` gửi cho gateway: `e2ee:<chatJid>` cho chat mã hóa, `thread:<threadId>` cho chat thường; nhóm nhận biết theo `threadType`.
+- Tên người gửi lấy bằng `_get_user_info` và được cache.
+- Tin trả lời không có xác nhận từ bridge (deliveryStatus UNKNOWN) vẫn trả 200 để gateway không gửi lại, tránh khách nhận trùng.
+
+### Trạng thái thiết bị E2EE
+
+`AccountBot` lưu trạng thái thiết bị E2EE vào `/data/accounts/<tên>/e2ee_device.json` (quyền `0600`). Upstream mặc định giữ trạng thái này trong RAM (`e2ee_memory_only=True`): mỗi lần restart là một thiết bị E2EE mới và tin đến thường báo `E2EE message could not be decrypted or was unavailable`. Đặt `FBCHAT_E2EE_PERSIST=0` để quay lại hành vi upstream. File này là khóa mã hóa của tài khoản: không copy ra ngoài volume.
 
 ## 🔄 Đồng bộ với upstream
 
