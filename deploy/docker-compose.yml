@@ -1,0 +1,74 @@
+# Chạy từ thư mục gốc repo: docker compose -f deploy/docker-compose.yml up -d --build
+# (hoặc cd deploy && docker compose up -d --build)
+#   1. "login" mở Chromium qua noVNC tại http://localhost:6080 để bạn đăng nhập.
+#   2. Khi có cookie, "login" ghi /data/accounts/$ACCOUNT/config.json rồi tự dừng.
+#   3. "bot" chỉ khởi động sau khi "login" kết thúc thành công và chạy mọi
+#      tài khoản trong /data/accounts bằng một tiến trình Python.
+# Thêm tài khoản: ACCOUNT=acc2 docker compose run --rm --service-ports login
+#                 docker compose restart bot
+# Đăng nhập lại: FORCE_LOGIN=1 ACCOUNT=<tên> docker compose run --rm --service-ports login
+
+# Giữ tên project cố định để volume vẫn là fbchat-v2_fbchat-data dù chạy từ đâu.
+name: fbchat-v2
+
+services:
+  login:
+    build: ./login
+    image: fbchat-v2-login
+    restart: "no"
+    ports:
+      # Chỉ bind localhost; không mở noVNC ra mạng ngoài.
+      - "127.0.0.1:6080:6080"
+    environment:
+      ACCOUNT: ${ACCOUNT:-default}
+      FORCE_LOGIN: ${FORCE_LOGIN:-0}
+      LOGIN_TIMEOUT: ${LOGIN_TIMEOUT:-900}
+      VNC_PASSWORD: ${VNC_PASSWORD:-}
+      BOT_ADMINS: ${BOT_ADMINS:-}
+      BOT_PREFIX: ${BOT_PREFIX:-/}
+    volumes:
+      - fbchat-data:/data
+    tmpfs:
+      # Profile Chromium chỉ nằm trong RAM, mất khi container dừng.
+      - /tmp:size=256m,uid=1000,gid=1000
+    shm_size: 128m
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 768M
+
+  bot:
+    build:
+      context: ..
+      dockerfile: deploy/bot/Dockerfile
+    image: fbchat-v2-bot
+    # multi_main tự thử lại có giới hạn và không thoát khi mọi tài khoản bị bỏ
+    # (chỉ báo unhealthy), nên unless-stopped không tạo vòng lặp gọi Facebook.
+    restart: unless-stopped
+    depends_on:
+      login:
+        condition: service_completed_successfully
+    volumes:
+      - fbchat-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          # Khoảng 25 MiB cho Python + 15-25 MiB mỗi tài khoản lúc rảnh, cộng dư cho media.
+          cpus: ${BOT_CPUS:-1.0}
+          memory: ${BOT_MEMORY_LIMIT:-512M}
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+volumes:
+  fbchat-data:
