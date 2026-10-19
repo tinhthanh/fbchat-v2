@@ -80,6 +80,7 @@ Khi đặt `GATEWAY_URL` và `GATEWAY_TOKEN` (ít nhất 32 ký tự), `multi_ma
 
 - `thread_id` gửi cho gateway: `e2ee:<chatJid>` cho chat mã hóa, `thread:<threadId>` cho chat thường; nhóm nhận biết theo `threadType`.
 - Tên người gửi lấy bằng `_get_user_info` và được cache.
+- File đính kèm (ảnh, video, audio, file): bot tải qua `downloadE2EEMedia` (chat mã hóa) hoặc `downloadMedia` (chat thường) rồi gửi kèm base64 cho gateway; file nhân viên gửi đi bằng `sendE2EEImage`/`sendE2EEVideo`/`sendE2EEAudio`/`sendE2EEDocument` hoặc `sendImage`/`sendFile`. Sticker, link, vị trí chỉ chuyển thành dòng mô tả. Giới hạn mỗi tệp `GATEWAY_MAX_FILE_MB` (mặc định 20).
 - Tin trả lời không có xác nhận từ bridge (deliveryStatus UNKNOWN) vẫn trả 200 để gateway không gửi lại, tránh khách nhận trùng.
 
 ### Trạng thái thiết bị E2EE

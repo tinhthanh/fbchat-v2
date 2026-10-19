@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 from typing import Any
 
@@ -10,7 +11,13 @@ import pytest
 import gateway_link
 import main as upstream_main
 import multi_main
-from gateway_link import GatewayLink, describe_message, thread_ref
+from gateway_link import (
+    GatewayLink,
+    describe_message,
+    fetch_attachment,
+    media_rpc,
+    thread_ref,
+)
 
 TOKEN = "0123456789abcdef0123456789abcdef"
 
@@ -43,10 +50,25 @@ class _Listener:
         return self.result
 
 
+class _FakeBridge:
+    def __init__(self, data: bytes = b"FILEDATA") -> None:
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+        self.data = base64.b64encode(data).decode()
+
+    async def call(
+        self, method: str, params: dict[str, Any] | None = None, timeout: float = 60.0
+    ) -> dict[str, Any]:
+        self.calls.append((method, params or {}))
+        if method.startswith("download"):
+            return {"data": self.data, "mimeType": "image/jpeg"}
+        return {"messageId": "mid.media"}
+
+
 class _Bot:
     def __init__(self) -> None:
         self.dataFB = {"FacebookID": "100"}
         self.listener = _Listener()
+        self.listener._bridge = _FakeBridge()  # type: ignore[attr-defined]
 
 
 def _link(handler: Any) -> GatewayLink:
@@ -110,6 +132,7 @@ async def test_forward_posts_inbound_with_names(
         "sender_name": "User 7",
         "text": "chào",
         "message_id": "m1",
+        "attachments": [],
     }
     assert sent[1]["thread_id"] == "e2ee:8@msgr" and sent[1]["thread_name"] == "User 8"
 
@@ -230,3 +253,142 @@ async def test_account_bot_forwards_to_gateway_instead_of_commands(
         "/ping"
     ]  # chuyển nguyên văn, không chạy lệnh; bỏ tin của chính bot
     assert listener.e2ee == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_attachment_uses_e2ee_or_regular_download() -> None:
+    bridge = _FakeBridge(b"IMG")
+    e2ee = {
+        "type": "image",
+        "directPath": "/v/t62",
+        "mediaKey": "a2V5",
+        "mediaSha256": "c2hh",
+        "mediaEncSha256": "ZW5j",
+        "mimeType": "image/jpeg",
+        "fileSize": 3,
+    }
+    file = await fetch_attachment(bridge, e2ee)  # type: ignore[arg-type]
+    assert file == {
+        "name": "image.jpg",
+        "content_type": "image/jpeg",
+        "data": base64.b64encode(b"IMG").decode(),
+    }
+    assert (
+        bridge.calls[0][0] == "downloadE2EEMedia"
+        and bridge.calls[0][1]["mediaType"] == "image"
+    )
+
+    regular = {
+        "type": "file",
+        "url": "https://cdn.fb/x.pdf",
+        "fileName": "x.pdf",
+        "mimeType": "application/pdf",
+    }
+    assert (await fetch_attachment(bridge, regular))["name"] == "x.pdf"  # type: ignore[arg-type,index]
+    assert bridge.calls[1] == ("downloadMedia", {"url": "https://cdn.fb/x.pdf"})
+
+    assert await fetch_attachment(bridge, {"type": "sticker", "url": "https://x"}) is None  # type: ignore[arg-type]
+    with pytest.raises(ValueError):
+        await fetch_attachment(bridge, {"type": "video", "url": "https://x", "fileSize": 999 << 20})  # type: ignore[arg-type]
+
+
+def test_media_rpc_picks_method_by_chat_and_mime() -> None:
+    img = {"name": "a", "content_type": "image/png", "data": "QQ=="}
+    doc = {"name": "bao-gia.pdf", "content_type": "application/pdf", "data": "QQ=="}
+    assert media_rpc("e2ee", "8@msgr", img)[0] == "sendE2EEImage"
+    method, params = media_rpc("e2ee", "8@msgr", doc)
+    assert (
+        method == "sendE2EEDocument"
+        and params["filename"] == "bao-gia.pdf"
+        and params["chatJid"] == "8@msgr"
+    )
+    assert (
+        media_rpc("e2ee", "8@msgr", {**img, "content_type": "video/mp4"})[0]
+        == "sendE2EEVideo"
+    )
+    assert (
+        media_rpc("e2ee", "8@msgr", {**img, "content_type": "audio/mpeg"})[0]
+        == "sendE2EEAudio"
+    )
+    method, params = media_rpc("thread", "9", img)
+    assert (
+        method == "sendImage"
+        and params["threadId"] == 9
+        and params["filename"] == "a.png"
+    )
+    assert media_rpc("thread", "9", doc)[0] == "sendFile"
+
+
+@pytest.mark.asyncio
+async def test_send_reply_sends_text_then_files() -> None:
+    link = _link(lambda r: httpx.Response(200))
+    bot = _Bot()
+    link.bots["acc1"] = bot  # type: ignore[assignment]
+    payload = {
+        "account": "acc1",
+        "thread_id": "e2ee:8@msgr",
+        "text": "gửi bạn file",
+        "message_id": "r1",
+        "attachments": [
+            {"name": "a.pdf", "content_type": "application/pdf", "data": "UERG"}
+        ],
+    }
+    assert await link.send_reply(payload) == (200, "ok")
+    assert bot.listener.e2ee == [("8@msgr", "gửi bạn file")]
+    assert [c[0] for c in bot.listener._bridge.calls] == ["sendE2EEDocument"]  # type: ignore[attr-defined]
+
+    only_file = {
+        "account": "acc1",
+        "thread_id": "thread:9",
+        "text": "",
+        "message_id": "r2",
+        "attachments": [
+            {"name": "p.jpg", "content_type": "image/jpeg", "data": "SlBH"}
+        ],
+    }
+    assert await link.send_reply(only_file) == (200, "ok")
+    assert bot.listener.regular == []
+    bad = {
+        **only_file,
+        "message_id": "r3",
+        "attachments": [{"name": "x", "data": "@@@"}],
+    }
+    assert (await link.send_reply(bad))[0] == 400
+
+
+@pytest.mark.asyncio
+async def test_forward_includes_downloaded_attachments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(json.loads(request.content))
+        return httpx.Response(200, json={})
+
+    async def fake_user_info(
+        dataFB: dict[str, Any], user_id: str, **_: Any
+    ) -> dict[str, Any]:
+        return {"nameUser": "Khách"}
+
+    monkeypatch.setattr(gateway_link._get_user_info, "func", fake_user_info)
+    link = _link(handler)
+    message = {
+        "messageID": "m9",
+        "userID": "7",
+        "body": "",
+        "chatJid": "7@msgr",
+        "attachments": [
+            {
+                "type": "image",
+                "directPath": "/p",
+                "mediaKey": "aw==",
+                "mimeType": "image/jpeg",
+                "fileSize": 8,
+            },
+            {"type": "sticker", "url": "https://sticker"},
+        ],
+    }
+    await link.forward("acc1", _Bot(), message)
+    assert sent[0]["text"] == "[sticker] https://sticker"
+    assert [a["name"] for a in sent[0]["attachments"]] == ["image.jpg"]
