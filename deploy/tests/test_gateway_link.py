@@ -110,7 +110,7 @@ async def test_forward_posts_inbound_with_names(
     async def fake_user_info(
         dataFB: dict[str, Any], user_id: str, **_: Any
     ) -> dict[str, Any]:
-        return {"nameUser": f"User {user_id}"}
+        return {"nameUser": f"User {user_id}", "thumbSrc": f"https://cdn/{user_id}.jpg"}
 
     monkeypatch.setattr(gateway_link._get_user_info, "func", fake_user_info)
     link = _link(handler)
@@ -135,8 +135,11 @@ async def test_forward_posts_inbound_with_names(
         "message_id": "m1",
         "attachments": [],
         "quote": "",
+        "thread_avatar": "",
     }
     assert sent[1]["thread_id"] == "e2ee:8@msgr" and sent[1]["thread_name"] == "User 8"
+    # 1-1: ảnh đại diện của người nhắn; nhóm thì chưa có.
+    assert sent[1]["thread_avatar"] == "https://cdn/8.jpg"
 
 
 @pytest.mark.asyncio

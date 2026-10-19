@@ -260,7 +260,8 @@ class GatewayLink:
         self.http = http_client
         self.log = log
         self.bots: dict[str, _Bot] = {}
-        self._names: dict[str, tuple[str, float]] = {}
+        # user id -> (tên, ảnh đại diện, lúc tra)
+        self._names: dict[str, tuple[str, str, float]] = {}
         self._recent_replies: OrderedDict[str, None] = OrderedDict()
         # messageId -> {summary, sender, thread_id, is_group}: cho trích dẫn E2EE
         # (chỉ có messageId), sửa tin (threadId=0), thu hồi và reaction.
@@ -303,19 +304,28 @@ class GatewayLink:
         if self.bots.get(account) is bot:
             del self.bots[account]
 
-    async def _user_name(self, bot: _Bot, user_id: str) -> str:
-        """Tên Facebook của user; tra lại sau 1 giờ nếu lần trước không có tên
-        (tài khoản không phải bạn bè hoặc ẩn hồ sơ thường không trả tên)."""
+    async def _user_profile(self, bot: _Bot, user_id: str) -> tuple[str, str]:
+        """Tên và ảnh đại diện Facebook của user; tra lại sau 1 giờ nếu lần trước
+        không có tên (tài khoản không phải bạn bè hoặc ẩn hồ sơ thường không trả tên).
+        """
         if not user_id:
-            return ""
+            return "", ""
         now = asyncio.get_running_loop().time()
         cached = self._names.get(user_id)
-        if cached is None or (not cached[0] and now - cached[1] > NAME_RETRY_SECONDS):
+        if cached is None or (not cached[0] and now - cached[2] > NAME_RETRY_SECONDS):
             info = await _get_user_info.func(bot.dataFB, user_id, client=self.http)
-            name = info.get("nameUser") if isinstance(info, dict) else None
-            cached = (name if isinstance(name, str) else "", now)
+            info = info if isinstance(info, dict) else {}
+            name, avatar = info.get("nameUser"), info.get("thumbSrc")
+            cached = (
+                name if isinstance(name, str) else "",
+                avatar if isinstance(avatar, str) else "",
+                now,
+            )
             self._names[user_id] = cached
-        return cached[0]
+        return cached[0], cached[1]
+
+    async def _user_name(self, bot: _Bot, user_id: str) -> str:
+        return (await self._user_profile(bot, user_id))[0]
 
     def _remember(self, account: str, message_id: str, entry: dict[str, Any]) -> None:
         # Khoá theo tài khoản: cùng một tin được bot của cả hai bên nhìn thấy.
@@ -529,9 +539,8 @@ class GatewayLink:
         thread_id, is_group = ref
         user_id = str(message.get("userID") or "")
         # Không tra được tên (ẩn hồ sơ / không phải bạn bè): dùng nhãn dễ đọc.
-        sender_name = await self._user_name(bot, user_id) or (
-            f"Facebook {user_id}" if user_id else ""
-        )
+        name, avatar = await self._user_profile(bot, user_id)
+        sender_name = name or (f"Facebook {user_id}" if user_id else "")
         self._remember(
             account,
             str(message.get("messageID") or ""),
@@ -558,6 +567,8 @@ class GatewayLink:
                     "message_id": str(message.get("messageID") or ""),
                     "attachments": files,
                     "quote": self._quote(account, message),
+                    # Nhóm Facebook: chưa có API ảnh nhóm, Libredesk dùng chữ viết tắt.
+                    "thread_avatar": "" if is_group else avatar,
                 },
             )
         except httpx.HTTPError as error:
