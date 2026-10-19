@@ -55,6 +55,7 @@ def _write_account(root: Path, name: str, **overrides: Any) -> Path:
 def test_upstream_contract_used_by_fork(mock_dataFB: dict[str, Any]) -> None:
     assert callable(upstream_main.log)
     assert callable(getattr(upstream_main.SimpleBot, "_queue_event", None))
+    assert callable(getattr(upstream_main.SimpleBot, "_forward_listener_event", None))
     for name in (
         "prefix",
         "admins",

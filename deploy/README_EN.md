@@ -83,6 +83,14 @@ With `GATEWAY_URL` and `GATEWAY_TOKEN` (at least 32 characters) set, `multi_main
 - Attachments (image, video, audio, file): the bot downloads them through `downloadE2EEMedia` (encrypted chats) or `downloadMedia` (regular chats) and sends them to the gateway as base64; agent files go out through `sendE2EEImage`/`sendE2EEVideo`/`sendE2EEAudio`/`sendE2EEDocument` or `sendImage`/`sendFile`. Stickers, links and locations become a one-line description. Per-file limit `GATEWAY_MAX_FILE_MB` (default 20).
 - A reply the bridge does not confirm (deliveryStatus UNKNOWN) still returns 200 so the gateway does not resend it and the customer does not get duplicates.
 
+### Rich content and events
+
+- Quotes: E2EE messages only carry `replyTo.messageId`, so the bot caches the last 4096 messages per account (key `account:messageId`) to send `quote` = `Name: text`.
+- Stickers are downloaded as images; locations become a Google Maps link; links carry their description.
+- `AccountBot._forward_listener_event` intercepts `e2eeReaction`, `reaction`, `messageEdit` and `messageUnsend` (dropped by the upstream SimpleBot) and sends them to `POST /v1/event`, where they become private notes.
+- Messages whose `senderId` is the account itself (sent from another device) become `owner_message` notes; messages the bot sent through `/send` are recognised by the returned `messageId` or by matching text within 60 seconds.
+- Facebook names that cannot be looked up (hidden profile / not friends) use the label `Facebook <id>` and are retried after an hour.
+
 ### E2EE device state
 
 `AccountBot` stores the E2EE device state in `/data/accounts/<name>/e2ee_device.json` (mode `0600`). Upstream keeps it in memory by default (`e2ee_memory_only=True`): every restart becomes a new E2EE device and incoming messages often fail with `E2EE message could not be decrypted or was unavailable`. Set `FBCHAT_E2EE_PERSIST=0` to restore the upstream behaviour. The file holds the account's encryption keys: do not copy it out of the volume.

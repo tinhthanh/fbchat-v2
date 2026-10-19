@@ -32,9 +32,18 @@ ONE_TO_ONE_THREAD_TYPES = frozenset({1, 7, 10, 13, 14, 15})
 MAX_REQUEST_BYTES = 96 << 20  # base64 của vài file 20 MiB
 MAX_FILE_BYTES = int(os.environ.get("GATEWAY_MAX_FILE_MB", "20")) << 20
 RECENT_MAX = 4096
+NAME_RETRY_SECONDS = 3600.0
 MEDIA_RPC_TIMEOUT = 180.0
 # Loại attachment của bridge có nội dung tải được; sticker/location/link chỉ mô tả.
-DOWNLOADABLE_TYPES = frozenset({"image", "video", "audio", "voice", "file", "gif"})
+DOWNLOADABLE_TYPES = frozenset(
+    {"image", "video", "audio", "voice", "file", "gif", "sticker"}
+)
+# Event phụ (SimpleBot upstream lọc bỏ) cần thành ghi chú nội bộ.
+META_EVENT_TYPES = frozenset(
+    {"e2eeReaction", "reaction", "messageEdit", "messageUnsend"}
+)
+ECHO_WINDOW_SECONDS = 60.0
+OWNER = "Chủ tài khoản"
 # mediaType cho downloadE2EEMedia (bridge nhận image/video/audio/voice/file/sticker).
 E2EE_MEDIA_TYPE = {"gif": "video"}
 EXT_BY_MIME = {
@@ -98,7 +107,29 @@ def thread_ref(message: dict[str, Any]) -> tuple[str, bool] | None:
 
 
 def describe_attachment(attachment: dict[str, Any]) -> str:
+    """Chữ hiển thị cho attachment không tải được hoặc không có file (vị trí, link)."""
     kind = attachment.get("type") or "attachment"
+    lat, lng = attachment.get("latitude"), attachment.get("longitude")
+    if kind == "location" and lat is not None and lng is not None:
+        label = attachment.get("description") or attachment.get("fileName") or ""
+        return "\n".join(
+            p
+            for p in (
+                f"📍 Vị trí{': ' + label if label else ''}",
+                f"https://maps.google.com/?q={lat},{lng}",
+            )
+            if p
+        )
+    if kind == "link":
+        lines = [
+            f"🔗 {attachment.get('description') or attachment.get('url') or 'Liên kết'}"
+        ]
+        lines += [
+            str(v) for v in (attachment.get("url"), attachment.get("sourceText")) if v
+        ]
+        return "\n".join(lines)
+    if kind == "sticker":
+        return "[Sticker]"
     detail = attachment.get("fileName") or attachment.get("url") or ""
     return f"[{kind}] {detail}".strip()
 
@@ -211,6 +242,11 @@ def media_rpc(
     return "sendFile", {**thread, "mimeType": mime}
 
 
+def summarize(message: dict[str, Any]) -> str:
+    text = " ".join(describe_message(message).split())
+    return text if len(text) <= 200 else text[:199] + "…"
+
+
 class GatewayLink:
     def __init__(
         self,
@@ -224,8 +260,13 @@ class GatewayLink:
         self.http = http_client
         self.log = log
         self.bots: dict[str, _Bot] = {}
-        self._names: dict[str, str] = {}
+        self._names: dict[str, tuple[str, float]] = {}
         self._recent_replies: OrderedDict[str, None] = OrderedDict()
+        # messageId -> {summary, sender, thread_id, is_group}: cho trích dẫn E2EE
+        # (chỉ có messageId), sửa tin (threadId=0), thu hồi và reaction.
+        self._recent: OrderedDict[str, dict[str, Any]] = OrderedDict()
+        self._bot_sent: OrderedDict[str, None] = OrderedDict()
+        self._pending: list[dict[str, Any]] = []
 
     @classmethod
     def from_env(
@@ -263,13 +304,196 @@ class GatewayLink:
             del self.bots[account]
 
     async def _user_name(self, bot: _Bot, user_id: str) -> str:
+        """Tên Facebook của user; tra lại sau 1 giờ nếu lần trước không có tên
+        (tài khoản không phải bạn bè hoặc ẩn hồ sơ thường không trả tên)."""
         if not user_id:
             return ""
-        if user_id not in self._names:
+        now = asyncio.get_running_loop().time()
+        cached = self._names.get(user_id)
+        if cached is None or (not cached[0] and now - cached[1] > NAME_RETRY_SECONDS):
             info = await _get_user_info.func(bot.dataFB, user_id, client=self.http)
             name = info.get("nameUser") if isinstance(info, dict) else None
-            self._names[user_id] = name if isinstance(name, str) else ""
-        return self._names[user_id]
+            cached = (name if isinstance(name, str) else "", now)
+            self._names[user_id] = cached
+        return cached[0]
+
+    def _remember(self, account: str, message_id: str, entry: dict[str, Any]) -> None:
+        # Khoá theo tài khoản: cùng một tin được bot của cả hai bên nhìn thấy.
+        if not message_id:
+            return
+        key = f"{account}:{message_id}"
+        self._recent[key] = entry
+        self._recent.move_to_end(key)
+        while len(self._recent) > RECENT_MAX:
+            self._recent.popitem(last=False)
+
+    def _mark_bot_sent(self, message_id: Any) -> None:
+        if message_id:
+            self._bot_sent[str(message_id)] = None
+            while len(self._bot_sent) > RECENT_MAX:
+                self._bot_sent.popitem(last=False)
+
+    def is_bot_echo(
+        self, account: str, thread_id: str, message: dict[str, Any]
+    ) -> bool:
+        """Tin của chính tài khoản do bot gửi (qua /send) thì không ghi chú lại."""
+        if str(message.get("messageID") or "") in self._bot_sent:
+            return True
+        now = asyncio.get_running_loop().time()
+        self._pending = [p for p in self._pending if p["until"] > now]
+        body = message.get("body") if isinstance(message.get("body"), str) else ""
+        for pending in self._pending:
+            if (
+                pending["account"] == account
+                and pending["thread_id"] == thread_id
+                and (
+                    (body and body == pending["text"])
+                    or (not body and pending["files"] > 0)
+                )
+            ):
+                self._pending.remove(pending)
+                return True
+        return False
+
+    def _quote(self, account: str, message: dict[str, Any]) -> str:
+        reply = _raw(message).get("replyTo")
+        if not isinstance(reply, dict):
+            return ""
+        cached = self._recent.get(f"{account}:{reply.get('messageId') or ''}")
+        text = reply.get("text") or (cached or {}).get("summary") or ""
+        sender = (cached or {}).get("sender") or ""
+        if not text:
+            return "(tin được trả lời không còn trong bộ nhớ của bot)"
+        return f"{sender}: {text}" if sender else str(text)
+
+    async def _post_event(
+        self,
+        account: str,
+        thread_id: str,
+        is_group: bool,
+        kind: str,
+        sender: str,
+        text: str,
+        event_id: str,
+        files: list[dict[str, str]] | None = None,
+    ) -> None:
+        try:
+            await self._post(
+                "/v1/event",
+                {
+                    "channel": CHANNEL,
+                    "account": account,
+                    "thread_id": thread_id,
+                    "is_group": is_group,
+                    "sender_name": sender,
+                    "kind": kind,
+                    "text": text,
+                    "message_id": f"{kind}-{event_id}" if event_id else "",
+                    "attachments": files or [],
+                },
+            )
+        except httpx.HTTPError as error:
+            self.log("gateway", f"❌ Không ghi được sự kiện {kind}: {error}")
+
+    async def forward_owner(
+        self, account: str, bot: _Bot, message: dict[str, Any]
+    ) -> None:
+        """Tin chủ tài khoản gửi từ thiết bị khác thành ghi chú nội bộ."""
+        ref = thread_ref(message)
+        if ref is None:
+            return
+        thread_id, is_group = ref
+        self._remember(
+            account,
+            str(message.get("messageID") or ""),
+            {
+                "summary": summarize(message),
+                "sender": OWNER,
+                "thread_id": thread_id,
+                "is_group": is_group,
+            },
+        )
+        if self.is_bot_echo(account, thread_id, message):
+            return
+        text, files = await self._collect(bot, message)
+        if text or files:
+            await self._post_event(
+                account,
+                thread_id,
+                is_group,
+                "owner_message",
+                OWNER,
+                text,
+                str(message.get("messageID") or ""),
+                files,
+            )
+
+    async def handle_meta(self, account: str, bot: _Bot, event: dict[str, Any]) -> None:
+        """Reaction, sửa tin, thu hồi thành ghi chú nội bộ."""
+        raw_data = event.get("data")
+        data: dict[str, Any] = raw_data if isinstance(raw_data, dict) else {}
+        kind = event.get("type")
+        message_id = str(data.get("messageId") or "")
+        cached = self._recent.get(f"{account}:{message_id}") or {}
+        own_id = str(bot.dataFB.get("FacebookID"))
+        if kind in ("e2eeReaction", "reaction"):
+            if kind == "e2eeReaction":
+                thread_id, is_group = f"e2ee:{data.get('chatJid')}", False
+                actor = str(data.get("senderId") or "")
+            else:
+                thread_id = cached.get("thread_id") or f"thread:{data.get('threadId')}"
+                is_group = bool(cached.get("is_group"))
+                actor = str(data.get("actorId") or "")
+            who = (
+                OWNER
+                if actor == own_id
+                else await self._user_name(bot, actor) or f"Facebook {actor}"
+            )
+            target = f" vào tin «{cached['summary']}»" if cached.get("summary") else ""
+            emoji = data.get("reaction") or "(bỏ cảm xúc)"
+            await self._post_event(
+                account,
+                thread_id,
+                is_group,
+                "reaction",
+                who,
+                f"{emoji}{target}",
+                f"{message_id}-{actor}-{emoji}",
+            )
+        elif kind == "messageEdit":
+            if not cached.get("thread_id"):
+                return  # sửa tin không rõ thread (bot chưa thấy tin gốc)
+            new_text = str(data.get("newText") or "")
+            text = f"«{cached.get('summary', '')}» → «{new_text}»"
+            cached["summary"] = new_text
+            await self._post_event(
+                account,
+                cached["thread_id"],
+                bool(cached.get("is_group")),
+                "edit",
+                cached.get("sender", ""),
+                text,
+                f"{message_id}-{data.get('editCount', '')}",
+            )
+        elif kind == "messageUnsend":
+            raw_thread = str(data.get("threadId") or "")
+            thread_id = cached.get("thread_id") or (
+                f"e2ee:{raw_thread}" if data.get("isE2EE") else f"thread:{raw_thread}"
+            )
+            text = (
+                f"«{cached['summary']}»"
+                if cached.get("summary")
+                else "(nội dung tin không còn trong bộ nhớ của bot)"
+            )
+            await self._post_event(
+                account,
+                thread_id,
+                bool(cached.get("is_group")),
+                "recall",
+                cached.get("sender", ""),
+                text,
+                message_id,
+            )
 
     async def _collect(
         self, bot: _Bot, message: dict[str, Any]
@@ -303,7 +527,21 @@ class GatewayLink:
         if not text and not files:
             return
         thread_id, is_group = ref
-        sender_name = await self._user_name(bot, str(message.get("userID") or ""))
+        user_id = str(message.get("userID") or "")
+        # Không tra được tên (ẩn hồ sơ / không phải bạn bè): dùng nhãn dễ đọc.
+        sender_name = await self._user_name(bot, user_id) or (
+            f"Facebook {user_id}" if user_id else ""
+        )
+        self._remember(
+            account,
+            str(message.get("messageID") or ""),
+            {
+                "summary": summarize(message),
+                "sender": sender_name,
+                "thread_id": thread_id,
+                "is_group": is_group,
+            },
+        )
         raw = _raw(message)
         thread_name = raw.get("threadName") or ("" if is_group else sender_name)
         try:
@@ -319,6 +557,7 @@ class GatewayLink:
                     "text": text,
                     "message_id": str(message.get("messageID") or ""),
                     "attachments": files,
+                    "quote": self._quote(account, message),
                 },
             )
         except httpx.HTTPError as error:
@@ -336,7 +575,8 @@ class GatewayLink:
 
     async def send_reply(self, payload: dict[str, Any]) -> tuple[int, str]:
         """Gửi tin trả lời của nhân viên (chữ và/hoặc file); trả về (status, mô tả)."""
-        bot = self.bots.get(str(payload.get("account") or ""))
+        account = str(payload.get("account") or "")
+        bot = self.bots.get(account)
         if bot is None:
             return 404, "unknown account"
         thread_id = payload.get("thread_id")
@@ -365,17 +605,31 @@ class GatewayLink:
             self._recent_replies.pop(message_id, None)
             return 502, "bridge not ready"
         result: dict[str, Any] = {}
+        pending = {
+            "account": str(payload.get("account")),
+            "thread_id": thread_id,
+            "text": text,
+            "files": len(files),
+            "until": asyncio.get_running_loop().time() + ECHO_WINDOW_SECONDS,
+        }
+        self._pending.append(pending)
         try:
             if text.strip() and kind == "e2ee":
                 result = await bot.listener.send_e2ee_message(target, text)
             elif text.strip():
                 result = await bot.listener.send_message(int(target), text)
+            self._after_send(account, result, thread_id, text)
             for f in files:
                 method, params = media_rpc(kind, target, f)
                 assert bridge is not None
                 result = await bridge.call(method, params, MEDIA_RPC_TIMEOUT)
+                self._after_send(
+                    account, result, thread_id, f"[Tệp] {f.get('name', '')}"
+                )
         except Exception as error:  # lỗi bridge/mạng: để gateway thử lại
             self._recent_replies.pop(message_id, None)
+            if pending in self._pending:
+                self._pending.remove(pending)
             self.log("gateway", f"❌ Gửi tin trả lời thất bại: {type(error).__name__}")
             return 502, "send failed"
         if not (result.get("messageId") or result.get("id")):
@@ -386,6 +640,23 @@ class GatewayLink:
             suffix = f" ({len(files)} tệp)" if files else ""
             self.log("gateway", f"Đã gửi tin trả lời của nhân viên{suffix}.")
         return 200, "ok"
+
+    def _after_send(
+        self, account: str, result: dict[str, Any], thread_id: str, summary: str
+    ) -> None:
+        sent_id = result.get("messageId") or result.get("id")
+        self._mark_bot_sent(sent_id)
+        if sent_id and summary.strip():
+            self._remember(
+                account,
+                str(sent_id),
+                {
+                    "summary": summary[:200],
+                    "sender": "Nhân viên",
+                    "thread_id": thread_id,
+                    "is_group": False,
+                },
+            )
 
     async def _handle_connection(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter

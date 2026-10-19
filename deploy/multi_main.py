@@ -37,7 +37,7 @@ from _core._storage import FileSessionStorage
 from _messaging._listening_e2ee import _format_exception_chain
 from main import DEFAULT_HTTP_TIMEOUT, SimpleBot, is_valid_datafb
 
-from gateway_link import GatewayLink
+from gateway_link import META_EVENT_TYPES, GatewayLink
 
 ACCOUNTS_DIR = Path(
     os.environ.get("FBCHAT_ACCOUNTS_DIR", Path(__file__).resolve().parent / "accounts")
@@ -118,13 +118,34 @@ class AccountBot(SimpleBot):
     async def _dispatch(self, message: dict[str, Any]) -> None:
         if _gateway is not None:
             sender_id = str(message.get("userID") or "")
-            if message.get("messageID") and sender_id != str(
-                self.dataFB.get("FacebookID")
-            ):
-                await _gateway.forward(self.account, self, message)
+            if message.get("messageID"):
+                if sender_id == str(self.dataFB.get("FacebookID")):
+                    # Chủ tài khoản gửi từ thiết bị khác: ghi chú, không phải tin khách.
+                    await _gateway.forward_owner(self.account, self, message)
+                else:
+                    await _gateway.forward(self.account, self, message)
             if not COMMANDS_FLAG:
                 return
         await super()._dispatch(message)
+
+    def _forward_listener_event(
+        self, loop: asyncio.AbstractEventLoop, event: dict[str, Any]
+    ) -> None:
+        # SimpleBot chỉ chuyển tin nhắn/điều khiển; reaction, sửa, thu hồi thì
+        # chuyển thẳng cho gateway (chạy trên event loop, gọi từ listener thread).
+        if (
+            _gateway is not None
+            and isinstance(event, dict)
+            and event.get("type") in META_EVENT_TYPES
+        ):
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    _gateway.handle_meta(self.account, self, event), loop
+                )
+            except RuntimeError:
+                pass  # loop đã đóng khi đang tắt
+            return
+        super()._forward_listener_event(loop, event)
 
     def _queue_event(self, event: dict[str, Any]) -> None:
         # call_soon_threadsafe chạy callback trong bản sao context của listener

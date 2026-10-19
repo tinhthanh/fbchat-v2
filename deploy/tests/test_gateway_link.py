@@ -13,6 +13,7 @@ import main as upstream_main
 import multi_main
 from gateway_link import (
     GatewayLink,
+    describe_attachment,
     describe_message,
     fetch_attachment,
     media_rpc,
@@ -133,6 +134,7 @@ async def test_forward_posts_inbound_with_names(
         "text": "chào",
         "message_id": "m1",
         "attachments": [],
+        "quote": "",
     }
     assert sent[1]["thread_id"] == "e2ee:8@msgr" and sent[1]["thread_name"] == "User 8"
 
@@ -227,11 +229,18 @@ async def test_account_bot_forwards_to_gateway_instead_of_commands(
     )
     forwarded: list[str] = []
 
+    owner: list[str] = []
+
     class _FakeGateway:
         async def forward(
             self, account: str, bot: Any, message: dict[str, Any]
         ) -> None:
             forwarded.append(message["body"])
+
+        async def forward_owner(
+            self, account: str, bot: Any, message: dict[str, Any]
+        ) -> None:
+            owner.append(message["body"])
 
     monkeypatch.setattr(multi_main, "_gateway", _FakeGateway())
     monkeypatch.setattr(multi_main, "COMMANDS_FLAG", False)
@@ -249,9 +258,8 @@ async def test_account_bot_forwards_to_gateway_instead_of_commands(
         }
     )
 
-    assert forwarded == [
-        "/ping"
-    ]  # chuyển nguyên văn, không chạy lệnh; bỏ tin của chính bot
+    assert forwarded == ["/ping"]  # chuyển nguyên văn, không chạy lệnh
+    assert owner == ["own"]  # tin của chính tài khoản đi nhánh ghi chú
     assert listener.e2ee == []
 
 
@@ -287,7 +295,7 @@ async def test_fetch_attachment_uses_e2ee_or_regular_download() -> None:
     assert (await fetch_attachment(bridge, regular))["name"] == "x.pdf"  # type: ignore[arg-type,index]
     assert bridge.calls[1] == ("downloadMedia", {"url": "https://cdn.fb/x.pdf"})
 
-    assert await fetch_attachment(bridge, {"type": "sticker", "url": "https://x"}) is None  # type: ignore[arg-type]
+    assert await fetch_attachment(bridge, {"type": "location", "latitude": 1, "longitude": 2}) is None  # type: ignore[arg-type]
     with pytest.raises(ValueError):
         await fetch_attachment(bridge, {"type": "video", "url": "https://x", "fileSize": 999 << 20})  # type: ignore[arg-type]
 
@@ -386,9 +394,262 @@ async def test_forward_includes_downloaded_attachments(
                 "mimeType": "image/jpeg",
                 "fileSize": 8,
             },
-            {"type": "sticker", "url": "https://sticker"},
+            {"type": "location", "latitude": 10.7, "longitude": 106.6},
         ],
     }
     await link.forward("acc1", _Bot(), message)
-    assert sent[0]["text"] == "[sticker] https://sticker"
+    assert sent[0]["text"] == "📍 Vị trí\nhttps://maps.google.com/?q=10.7,106.6"
     assert [a["name"] for a in sent[0]["attachments"]] == ["image.jpg"]
+
+
+def _recording_link() -> tuple[GatewayLink, list[tuple[str, dict[str, Any]]]]:
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append((request.url.path, json.loads(request.content)))
+        return httpx.Response(200, json={})
+
+    return _link(handler), calls
+
+
+async def _names(dataFB: dict[str, Any], user_id: str, **_: Any) -> dict[str, Any]:
+    return {"nameUser": f"User {user_id}"}
+
+
+def test_describe_attachment_location_link_sticker() -> None:
+    loc = {
+        "type": "location",
+        "latitude": 10.77,
+        "longitude": 106.7,
+        "description": "Quán",
+    }
+    assert (
+        describe_attachment(loc)
+        == "📍 Vị trí: Quán\nhttps://maps.google.com/?q=10.77,106.7"
+    )
+    link = {
+        "type": "link",
+        "url": "https://shop.vn/a",
+        "description": "Áo thun",
+        "sourceText": "shop.vn",
+    }
+    assert describe_attachment(link) == "🔗 Áo thun\nhttps://shop.vn/a\nshop.vn"
+    assert describe_attachment({"type": "sticker"}) == "[Sticker]"
+
+
+@pytest.mark.asyncio
+async def test_quote_uses_cached_text_for_e2ee_replies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(gateway_link._get_user_info, "func", _names)
+    link, calls = _recording_link()
+    first = {
+        "messageID": "m1",
+        "userID": "7",
+        "body": "giá bao nhiêu?",
+        "chatJid": "7@msgr",
+    }
+    await link.forward("acc1", _Bot(), first)
+    reply = {
+        "messageID": "m2",
+        "userID": "7",
+        "body": "còn hàng không?",
+        "chatJid": "7@msgr",
+        "raw": {"replyTo": {"messageId": "m1"}},
+    }
+    await link.forward("acc1", _Bot(), reply)
+    regular = {
+        "messageID": "m3",
+        "userID": "8",
+        "body": "ok",
+        "raw": {
+            "threadId": 5,
+            "threadType": 1,
+            "replyTo": {"messageId": "zz", "text": "tin cũ"},
+        },
+    }
+    await link.forward("acc1", _Bot(), regular)
+    assert calls[0][1]["quote"] == ""
+    assert calls[1][1]["quote"] == "User 7: giá bao nhiêu?"
+    assert calls[2][1]["quote"] == "tin cũ"
+
+
+@pytest.mark.asyncio
+async def test_owner_message_note_skips_bot_echoes() -> None:
+    link, calls = _recording_link()
+    bot = _Bot()
+    link.bots["acc1"] = bot  # type: ignore[assignment]
+    # Bot gửi trả lời nhân viên: tin này có thể quay về như tin của chính tài khoản.
+    await link.send_reply(
+        {
+            "account": "acc1",
+            "thread_id": "e2ee:8@msgr",
+            "text": "nhân viên trả lời",
+            "message_id": "r1",
+        }
+    )
+    echo = {
+        "messageID": "mid.other",
+        "userID": "100",
+        "body": "nhân viên trả lời",
+        "chatJid": "8@msgr",
+    }
+    await link.forward_owner("acc1", bot, echo)
+    by_id = {
+        "messageID": "mid.out",
+        "userID": "100",
+        "body": "khác",
+        "chatJid": "8@msgr",
+    }  # id trả về từ send
+    await link.forward_owner("acc1", bot, by_id)
+    phone = {
+        "messageID": "m9",
+        "userID": "100",
+        "body": "chủ shop trả lời từ điện thoại",
+        "chatJid": "8@msgr",
+    }
+    await link.forward_owner("acc1", bot, phone)
+    events = [c[1] for c in calls if c[0] == "/v1/event"]
+    assert len(events) == 1
+    assert (
+        events[0]["kind"] == "owner_message" and events[0]["thread_id"] == "e2ee:8@msgr"
+    )
+    assert events[0]["text"] == "chủ shop trả lời từ điện thoại"
+
+
+@pytest.mark.asyncio
+async def test_meta_events_become_notes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(gateway_link._get_user_info, "func", _names)
+    link, calls = _recording_link()
+    bot = _Bot()
+    await link.forward(
+        "acc1",
+        bot,
+        {"messageID": "m1", "userID": "7", "body": "giá 5 triệu", "chatJid": "7@msgr"},
+    )
+    await link.handle_meta(
+        "acc1",
+        bot,
+        {
+            "type": "e2eeReaction",
+            "data": {
+                "chatJid": "7@msgr",
+                "messageId": "m1",
+                "reaction": "❤️",
+                "senderId": 7,
+            },
+        },
+    )
+    await link.handle_meta(
+        "acc1",
+        bot,
+        {
+            "type": "messageEdit",
+            "data": {"messageId": "m1", "newText": "giá 4 triệu", "editCount": 1},
+        },
+    )
+    await link.handle_meta(
+        "acc1",
+        bot,
+        {"type": "messageEdit", "data": {"messageId": "unknown", "newText": "x"}},
+    )
+    await link.handle_meta(
+        "acc1",
+        bot,
+        {
+            "type": "messageUnsend",
+            "data": {"isE2EE": True, "messageId": "m1", "threadId": "7@msgr"},
+        },
+    )
+    events = [c[1] for c in calls if c[0] == "/v1/event"]
+    assert [(e["kind"], e["thread_id"]) for e in events] == [
+        ("reaction", "e2ee:7@msgr"),
+        ("edit", "e2ee:7@msgr"),
+        ("recall", "e2ee:7@msgr"),
+    ]
+    assert (
+        events[0]["text"] == "❤️ vào tin «giá 5 triệu»"
+        and events[0]["sender_name"] == "User 7"
+    )
+    assert events[1]["text"] == "«giá 5 triệu» → «giá 4 triệu»"
+    assert events[2]["text"] == "«giá 4 triệu»"
+
+
+@pytest.mark.asyncio
+async def test_account_bot_routes_meta_events_to_gateway(
+    monkeypatch: pytest.MonkeyPatch, mock_dataFB: dict[str, Any]
+) -> None:
+    monkeypatch.setattr(
+        upstream_main, "listeningE2EEEvent", lambda data, **options: _Listener()
+    )
+    handled: list[str] = []
+
+    class _FakeGateway:
+        async def handle_meta(
+            self, account: str, bot: Any, event: dict[str, Any]
+        ) -> None:
+            handled.append(event["type"])
+
+    monkeypatch.setattr(multi_main, "_gateway", _FakeGateway())
+    bot = multi_main.AccountBot(mock_dataFB, account="acc1", device_path="/d.json")
+    loop = asyncio.get_running_loop()
+    bot._forward_listener_event(loop, {"type": "messageUnsend", "data": {}})
+    bot._forward_listener_event(loop, {"type": "typing", "data": {}})
+    await asyncio.sleep(0.05)
+    assert handled == ["messageUnsend"]
+
+
+@pytest.mark.asyncio
+async def test_cache_is_per_account(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Cùng một tin được hai tài khoản nhìn thấy: mỗi bên giữ ngữ cảnh riêng."""
+    monkeypatch.setattr(gateway_link._get_user_info, "func", _names)
+    link, calls = _recording_link()
+    bot = _Bot()
+    msg = {"messageID": "m1", "userID": "7", "body": "giá 5 triệu", "chatJid": "7@msgr"}
+    await link.forward("shop", bot, msg)  # shop nhận tin của khách 7
+    owner_bot = _Bot()
+    owner_bot.dataFB = {"FacebookID": "7"}
+    await link.forward_owner(
+        "khach", owner_bot, {**msg, "chatJid": "100@msgr"}
+    )  # khách 7 thấy tin của chính mình
+    await link.handle_meta(
+        "shop",
+        bot,
+        {
+            "type": "messageUnsend",
+            "data": {"isE2EE": True, "messageId": "m1", "threadId": "7@msgr"},
+        },
+    )
+    reply = {
+        "messageID": "m2",
+        "userID": "7",
+        "body": "?",
+        "chatJid": "7@msgr",
+        "raw": {"replyTo": {"messageId": "m1"}},
+    }
+    await link.forward("shop", bot, reply)
+    events = [c[1] for c in calls if c[0] == "/v1/event" and c[1]["account"] == "shop"]
+    assert events[0]["kind"] == "recall" and events[0]["thread_id"] == "e2ee:7@msgr"
+    assert events[0]["sender_name"] == "User 7"
+    inbound = [c[1] for c in calls if c[0] == "/v1/inbound"]
+    assert inbound[-1]["quote"] == "User 7: giá 5 triệu"
+
+
+@pytest.mark.asyncio
+async def test_unknown_name_falls_back_to_readable_label(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def no_name(dataFB: dict[str, Any], user_id: str, **_: Any) -> dict[str, Any]:
+        return {"error": 1}
+
+    monkeypatch.setattr(gateway_link._get_user_info, "func", no_name)
+    link, calls = _recording_link()
+    await link.forward(
+        "shop",
+        _Bot(),
+        {"messageID": "m1", "userID": "42", "body": "hi", "chatJid": "42@msgr"},
+    )
+    assert (
+        calls[0][1]["thread_name"] == "Facebook 42"
+        and calls[0][1]["sender_name"] == "Facebook 42"
+    )

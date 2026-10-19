@@ -83,6 +83,14 @@ Khi đặt `GATEWAY_URL` và `GATEWAY_TOKEN` (ít nhất 32 ký tự), `multi_ma
 - File đính kèm (ảnh, video, audio, file): bot tải qua `downloadE2EEMedia` (chat mã hóa) hoặc `downloadMedia` (chat thường) rồi gửi kèm base64 cho gateway; file nhân viên gửi đi bằng `sendE2EEImage`/`sendE2EEVideo`/`sendE2EEAudio`/`sendE2EEDocument` hoặc `sendImage`/`sendFile`. Sticker, link, vị trí chỉ chuyển thành dòng mô tả. Giới hạn mỗi tệp `GATEWAY_MAX_FILE_MB` (mặc định 20).
 - Tin trả lời không có xác nhận từ bridge (deliveryStatus UNKNOWN) vẫn trả 200 để gateway không gửi lại, tránh khách nhận trùng.
 
+### Tin giàu nội dung và sự kiện
+
+- Trích dẫn: tin E2EE chỉ có `replyTo.messageId`, nên bot nhớ 4096 tin gần nhất mỗi tài khoản (khoá `tài khoản:messageId`) để gửi `quote` = `Tên: nội dung`.
+- Sticker tải về như ảnh; vị trí thành link Google Maps; link kèm mô tả.
+- `AccountBot._forward_listener_event` chặn `e2eeReaction`, `reaction`, `messageEdit`, `messageUnsend` (SimpleBot upstream lọc bỏ) và gửi `POST /v1/event`, thành ghi chú nội bộ.
+- Tin có `senderId` là chính tài khoản (gửi từ thiết bị khác) thành ghi chú `owner_message`; tin do bot gửi qua `/send` được nhận ra bằng `messageId` trả về hoặc trùng nội dung trong 60 giây.
+- Tên Facebook không tra được (ẩn hồ sơ / không phải bạn bè) dùng nhãn `Facebook <id>` và được tra lại sau 1 giờ.
+
 ### Trạng thái thiết bị E2EE
 
 `AccountBot` lưu trạng thái thiết bị E2EE vào `/data/accounts/<tên>/e2ee_device.json` (quyền `0600`). Upstream mặc định giữ trạng thái này trong RAM (`e2ee_memory_only=True`): mỗi lần restart là một thiết bị E2EE mới và tin đến thường báo `E2EE message could not be decrypted or was unavailable`. Đặt `FBCHAT_E2EE_PERSIST=0` để quay lại hành vi upstream. File này là khóa mã hóa của tài khoản: không copy ra ngoài volume.
