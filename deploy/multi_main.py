@@ -39,6 +39,15 @@ from _core._storage import FileSessionStorage
 from _messaging._listening_e2ee import _format_exception_chain
 from main import DEFAULT_HTTP_TIMEOUT, SimpleBot, is_valid_datafb
 
+from connection_history import (
+    HISTORY_FILE,
+    SESSION_CAUSES,
+    ConnectionHistory,
+    classify_bridge_error,
+    classify_raw_event,
+    describe_run_error,
+    diagnose_session,
+)
 from gateway_link import (
     META_EVENT_TYPES,
     PRESENCE_EVENT_TYPES,
@@ -77,6 +86,8 @@ _account_profiles: dict[str, dict[str, str]] = {}
 # tên tài khoản -> {"kind", "message"}: lỗi gần nhất, để trang biết cần đăng nhập
 # lại ("session_expired") hay chỉ là lỗi kết nối ("connection").
 _account_errors: dict[str, dict[str, str]] = {}
+# tên tài khoản -> lịch sử kết nối (rớt vì sao, nối lại lúc nào).
+_account_history: dict[str, ConnectionHistory] = {}
 
 SESSION_EXPIRED_ATTEMPTS = 2
 SESSION_EXPIRED_MESSAGE = (
@@ -86,6 +97,18 @@ SESSION_EXPIRED_MESSAGE = (
 
 class SessionExpiredError(RuntimeError):
     """Cookie không còn cho ra dataFB: Facebook đã huỷ phiên."""
+
+    def __init__(self, message: str, cause: str = "unknown") -> None:
+        super().__init__(message)
+        self.cause = cause  # khoá của SESSION_CAUSES
+
+
+def account_history(name: str, account_dir: Path | None = None) -> ConnectionHistory:
+    history = _account_history.get(name)
+    if history is None:
+        path = account_dir / HISTORY_FILE if account_dir is not None else None
+        history = _account_history[name] = ConnectionHistory(path)
+    return history
 
 
 async def facebook_reachable(http_client: httpx.AsyncClient) -> bool:
@@ -99,7 +122,12 @@ async def facebook_reachable(http_client: httpx.AsyncClient) -> bool:
 
 def describe_account_error(error: BaseException) -> dict[str, str]:
     if isinstance(error, SessionExpiredError):
-        return {"kind": "session_expired", "message": SESSION_EXPIRED_MESSAGE}
+        cause = SESSION_CAUSES.get(error.cause, SESSION_CAUSES["unknown"])
+        return {
+            "kind": "session_expired",
+            "message": f"{SESSION_EXPIRED_MESSAGE} Nguyên nhân: {cause}",
+            "cause": error.cause,
+        }
     return {
         "kind": "connection",
         "message": f"Lỗi kết nối: {_format_exception_chain(error)}"[:200],
@@ -175,6 +203,7 @@ class AccountBot(SimpleBot):
     def _forward_listener_event(
         self, loop: asyncio.AbstractEventLoop, event: dict[str, Any]
     ) -> None:
+        self._record_lifecycle(event)
         # SimpleBot chỉ chuyển tin nhắn/điều khiển; reaction, sửa, thu hồi thì
         # chuyển thẳng cho gateway (chạy trên event loop, gọi từ listener thread).
         if (
@@ -226,6 +255,25 @@ class AccountBot(SimpleBot):
                 pass  # loop đã đóng khi đang tắt
             return
         super()._forward_listener_event(loop, event)
+
+    def _record_lifecycle(self, event: Any) -> None:
+        """Ghi các mốc kết nối E2EE (gọi từ listener thread) vào lịch sử."""
+        if not isinstance(event, dict):
+            return
+        kind = event.get("type")
+        history = account_history(self.account)
+        if kind == "disconnected":
+            history.record("disconnected", "Messenger ngắt kết nối E2EE")
+        elif kind == "reconnected":
+            history.record("connected", "Đã nối lại Messenger")
+        elif kind == "error":
+            label = classify_bridge_error(event.get("data"))
+            if label:
+                history.record("platform", label)
+        elif kind == "raw":
+            label = classify_raw_event(event)
+            if label:
+                history.record("platform", label)
 
     def _queue_event(self, event: dict[str, Any]) -> None:
         # call_soon_threadsafe chạy callback trong bản sao context của listener
@@ -293,8 +341,10 @@ async def run_account(
         # tới được Facebook.
         if not await facebook_reachable(http_client):
             raise ConnectionError("Không kết nối được Facebook (mất mạng?).")
+        cause = await diagnose_session(http_client, str(config.get("cookies") or ""))
         raise SessionExpiredError(
-            "Không lấy được dataFB hợp lệ; cookie đã hết hạn hoặc HTML token đã đổi."
+            "Không lấy được dataFB hợp lệ; cookie đã hết hạn hoặc HTML token đã đổi.",
+            cause,
         )
     bot = AccountBot(
         dataFB,
@@ -354,6 +404,7 @@ async def supervise_account(
     """
     LOG_LABEL.set(name)
     loop = asyncio.get_running_loop()
+    history = account_history(name, account_dir)
     attempt = 0
     while True:
         started = loop.time()
@@ -370,6 +421,10 @@ async def supervise_account(
             # Bắt rộng để lỗi của một tài khoản không làm dừng tài khoản khác;
             # CancelledError là BaseException nên vẫn được lan ra khi shutdown.
             _account_errors[name] = describe_account_error(error)
+            if isinstance(error, SessionExpiredError):
+                history.record("session_expired", _account_errors[name]["message"])
+            else:
+                history.record(*describe_run_error(error))
             attempt = 1 if loop.time() - started >= stable_after else attempt + 1
             # Phiên đã hết hạn: thử lại một lần (phòng lỗi thoáng qua) rồi dừng,
             # gọi Facebook liên tục bằng cookie hỏng dễ bị coi là bất thường.
@@ -405,6 +460,7 @@ async def supervise_account(
 def _mark_running(name: str) -> None:
     _account_errors.pop(name, None)
     set_account_state(name, "running")
+    account_history(name).record("connected", "Đã kết nối")
 
 
 class AccountManager:
@@ -436,9 +492,13 @@ class AccountManager:
         set_account_state(name, None)
         _account_profiles.pop(name, None)
         _account_errors.pop(name, None)
+        _account_history.pop(name, None)
 
     async def restart(self, name: str) -> None:
         await self.stop(name)
+        account_history(name, self.root / name).record(
+            "manual", "Khởi động lại tài khoản (đăng nhập lại hoặc bấm Kết nối lại)"
+        )
         self.start(name)
 
     def list(self) -> list[dict[str, Any]]:
@@ -458,6 +518,7 @@ class AccountManager:
                 "state": _account_states.get(n, "stopped"),
                 "profile": _account_profiles.get(n),
                 "error": _account_errors.get(n),
+                "history": account_history(n, self.root / n).list(),
             }
             for n in sorted(names)
         ]

@@ -12,6 +12,7 @@ website
 deploy
 !deploy/multi_main.py
 !deploy/gateway_link.py
+!deploy/connection_history.py
 src/config.json
 src/test.py
 .env

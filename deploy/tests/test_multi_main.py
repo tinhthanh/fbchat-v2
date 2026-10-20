@@ -160,11 +160,17 @@ async def test_run_account_rejects_invalid_session(
     async def fake_reachable(_: Any) -> bool:
         return reachable["ok"]
 
+    async def fake_diagnose(_: Any, cookie: str) -> str:
+        assert cookie  # chẩn đoán bằng cookie của chính tài khoản
+        return "revoked"
+
     monkeypatch.setattr(multi_main, "dataGetHome", fake_data_get_home)
     monkeypatch.setattr(multi_main, "facebook_reachable", fake_reachable)
+    monkeypatch.setattr(multi_main, "diagnose_session", fake_diagnose)
 
-    with pytest.raises(multi_main.SessionExpiredError, match="dataFB"):
+    with pytest.raises(multi_main.SessionExpiredError, match="dataFB") as raised:
         await multi_main.run_account("acc1", account_dir, object())  # type: ignore[arg-type]
+    assert raised.value.cause == "revoked"
     # Mất mạng: dataGetHome cũng trả None nhưng không phải hết phiên.
     reachable["ok"] = False
     with pytest.raises(ConnectionError):
@@ -353,7 +359,7 @@ async def test_last_error_says_whether_to_sign_in_again(
         name: str, *_: Any, on_ready: Any = None, **__: Any
     ) -> None:
         if name == "expired":
-            raise multi_main.SessionExpiredError("dataFB")
+            raise multi_main.SessionExpiredError("dataFB", "checkpoint")
         if name == "flaky":
             if flaky_calls:
                 await asyncio.Event().wait()  # lần sau: đang thử lại, chưa xong
@@ -364,24 +370,35 @@ async def test_last_error_says_whether_to_sign_in_again(
     monkeypatch.setattr(multi_main, "run_account", fake_run_account)
     monkeypatch.setattr(multi_main, "_account_errors", {"ok": {"kind": "connection"}})
     monkeypatch.setattr(multi_main, "_account_states", {})
+    monkeypatch.setattr(multi_main, "_account_history", {})
     flaky_calls: list[int] = []
     for name in ("expired", "ok"):
         await multi_main.supervise_account(
-            name, tmp_path, object(), max_attempts=1, retry_base=0  # type: ignore[arg-type]
+            name, tmp_path / name, object(), max_attempts=1, retry_base=0  # type: ignore[arg-type]
         )
     # Lỗi kết nối không bao giờ bỏ tài khoản: vẫn đang thử lại.
     flaky = asyncio.create_task(
         multi_main.supervise_account(
-            "flaky", tmp_path, object(), max_attempts=1, retry_base=0  # type: ignore[arg-type]
+            "flaky", tmp_path / "flaky", object(), max_attempts=1, retry_base=0  # type: ignore[arg-type]
         )
     )
     await asyncio.sleep(0.05)
     assert multi_main._account_states["flaky"] in ("starting", "retrying")
     flaky.cancel()
     errors = multi_main._account_errors
-    assert errors["expired"] == {
-        "kind": "session_expired",
-        "message": multi_main.SESSION_EXPIRED_MESSAGE,
+    assert errors["expired"]["kind"] == "session_expired"
+    assert errors["expired"]["cause"] == "checkpoint"
+    assert errors["expired"]["message"].startswith(multi_main.SESSION_EXPIRED_MESSAGE)
+    assert "checkpoint" in errors["expired"]["message"]
+    # Lịch sử: hết phiên kèm nguyên nhân, lỗi kết nối, chạy được thì "connected".
+    kinds = {
+        n: [h["kind"] for h in multi_main._account_history[n].list()]
+        for n in ("expired", "ok", "flaky")
+    }
+    assert kinds == {
+        "expired": ["session_expired"],
+        "ok": ["connected"],
+        "flaky": ["disconnected"],
     }
     assert errors["flaky"]["kind"] == "connection"
     assert "bridge closed" in errors["flaky"]["message"]
