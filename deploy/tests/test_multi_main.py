@@ -367,3 +367,22 @@ async def test_last_error_says_whether_to_sign_in_again(
     listed = {a["name"]: a for a in manager.list()}
     assert listed["expired"]["error"]["kind"] == "session_expired"
     assert listed["ok"]["error"] is None
+
+
+@pytest.mark.asyncio
+async def test_expired_session_stops_after_two_attempts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls = {"n": 0}
+
+    async def fake_run_account(name: str, *_: Any, **__: Any) -> None:
+        calls["n"] += 1
+        raise multi_main.SessionExpiredError("dataFB")
+
+    monkeypatch.setattr(multi_main, "run_account", fake_run_account)
+    monkeypatch.setattr(multi_main, "_account_states", {})
+    ok = await multi_main.supervise_account(
+        "expired", tmp_path, object(), max_attempts=5, retry_base=0  # type: ignore[arg-type]
+    )
+    assert ok is False and calls["n"] == multi_main.SESSION_EXPIRED_ATTEMPTS
+    assert multi_main._account_states["expired"] == "dropped"

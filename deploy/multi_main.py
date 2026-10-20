@@ -69,6 +69,7 @@ _account_profiles: dict[str, dict[str, str]] = {}
 # lại ("session_expired") hay chỉ là lỗi kết nối ("connection").
 _account_errors: dict[str, dict[str, str]] = {}
 
+SESSION_EXPIRED_ATTEMPTS = 2
 SESSION_EXPIRED_MESSAGE = (
     "Phiên Facebook đã hết hạn hoặc bị đăng xuất: cần đăng nhập lại."
 )
@@ -331,7 +332,14 @@ async def supervise_account(
             # CancelledError là BaseException nên vẫn được lan ra khi shutdown.
             _account_errors[name] = describe_account_error(error)
             attempt = 1 if loop.time() - started >= stable_after else attempt + 1
-            if attempt >= max_attempts:
+            # Phiên đã hết hạn: thử lại một lần (phòng lỗi thoáng qua) rồi dừng,
+            # gọi Facebook liên tục bằng cookie hỏng dễ bị coi là bất thường.
+            limit = (
+                min(max_attempts, SESSION_EXPIRED_ATTEMPTS)
+                if isinstance(error, SessionExpiredError)
+                else max_attempts
+            )
+            if attempt >= limit:
                 set_account_state(name, "dropped")
                 log(
                     "multi",
