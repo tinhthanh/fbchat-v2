@@ -11,7 +11,8 @@ deploy/
 ├── docker-compose.yml          # project "fbchat-v2", volume fbchat-data
 ├── login/                      # Alpine + Chromium + noVNC, captures cookies then stops
 │   ├── Dockerfile
-│   └── extract_cookie.py
+│   ├── extract_cookie.py
+│   └── control.py              # fb-login-ui service: browser on demand
 ├── bot/                        # python:3.12-alpine + statically built Go bridge
 │   ├── Dockerfile
 │   └── Dockerfile.dockerignore # per-Dockerfile ignore file (BuildKit), root untouched
@@ -85,6 +86,21 @@ With `GATEWAY_URL` and `GATEWAY_TOKEN` (at least 32 characters) set, `multi_main
 - Undecryptable E2EE messages: the bridge only emits a generic error, but the whatsmeow `raw` event (`UndecryptableMessage`) carries the chat, sender and message ID. The bot sends `⚠️ Tin nhắn mã hóa không giải mã được: xem trên Messenger` into the right conversation (own ID `undecryptable-<id>`, so the real message still gets through if it is decrypted later). Own messages and `DecryptFailMode=hide` are skipped.
 - Regular (non-E2EE) messages sent while the bot was down: the bridge drops messages older than the connect time, and the sync on connect does not resend missed messages either (Messenger loads them only when a thread is opened), so they are not recovered yet. New Facebook chats are E2EE, which the bridge resyncs itself.
 - A reply the bridge does not confirm (deliveryStatus UNKNOWN) still returns 200 so the gateway does not resend it and the customer does not get duplicates.
+
+### Account management (/accounts)
+
+The bot's HTTP server (same `GATEWAY_TOKEN` as `/send`) also serves routes for the Libredesk **Channel accounts** page; the gateway calls them, browsers never do:
+
+| Route | Action |
+|---|---|
+| `GET /accounts` | Accounts: `name`, `state` (`starting`, `running`, `retrying`, `dropped`, `stopped`), `profile` (`uid`, `displayName`, `avatar`) |
+| `POST /accounts/<name>/cookie` `{"cookie": "..."}` | The cookie must contain `c_user` and `xs`; the bot runs `dataGetHome` to check it with Facebook (422 when rejected, nothing saved), then writes `config.json` (0600) and starts the account |
+| `POST /accounts/<name>/restart` | Reconnect (also used after a browser sign-in) |
+| `DELETE /accounts/<name>` | Stop and delete the account directory |
+
+`AccountManager` (in `multi_main.py`) runs each account in its own task; stopping or reconnecting cancels the task and `SimpleBot.run()` stops the bridge. With the gateway enabled the bot also starts with no accounts.
+
+Browser sign-in uses the `fb-login-ui` service (`login/` image, `control.py` command): idle it is only the control server (~20 MiB); `POST /session {"account"}` runs `extract_cookie.py` with `FORCE_LOGIN=1` (Chromium + noVNC on port 6080), `GET /session` reports `starting` until noVNC accepts connections, then `running`, and `success` once the cookie is written; `DELETE /session` cancels. One session at a time; the Chromium profile is wiped before and after each session so the next account never inherits cookies. The control server requires `GATEWAY_TOKEN` and does not log URLs or headers.
 
 ### Rich content and events
 

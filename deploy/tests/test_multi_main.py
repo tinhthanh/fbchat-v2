@@ -280,3 +280,56 @@ async def test_health_file_tracks_running_and_dropped_accounts(
         "good": "running",
         "bad": "dropped",
     }
+
+
+@pytest.mark.asyncio
+async def test_account_manager_routes_cookie_restart_and_remove(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mock_dataFB: dict[str, Any]
+) -> None:
+    _write_account(tmp_path, "shop")
+    started: list[str] = []
+    gate = asyncio.Event()
+
+    async def fake_supervise(name: str, *_: Any, **__: Any) -> bool:
+        started.append(name)
+        multi_main.set_account_state(name, "running")
+        await gate.wait()
+        return True
+
+    async def fake_data_get_home(cookie: str) -> dict[str, Any] | None:
+        return mock_dataFB if "xs=good" in cookie else None
+
+    monkeypatch.setattr(multi_main, "supervise_account", fake_supervise)
+    monkeypatch.setattr(multi_main, "dataGetHome", fake_data_get_home)
+    monkeypatch.setattr(multi_main, "_account_states", {})
+    manager = multi_main.AccountManager(tmp_path, object())  # type: ignore[arg-type]
+    manager.start("shop")
+    await asyncio.sleep(0)
+
+    assert await manager.handle("POST", "/send", b"") is None
+    status, listed = await manager.handle("GET", "/accounts", b"")
+    assert status == 200 and listed[0]["name"] == "shop"
+    assert listed[0]["state"] == "running"
+    assert (await manager.handle("POST", "/accounts/..%2F/cookie", b"{}"))[0] == 400
+
+    no_xs = json.dumps({"cookie": "c_user=1;"}).encode()
+    assert (await manager.handle("POST", "/accounts/new1/cookie", no_xs))[0] == 400
+    bad = json.dumps({"cookie": "c_user=1; xs=bad;"}).encode()
+    assert (await manager.handle("POST", "/accounts/new1/cookie", bad))[0] == 422
+    assert not (tmp_path / "new1").exists()
+    good = json.dumps({"cookie": "c_user=1; xs=good;"}).encode()
+    status, body = await manager.handle("POST", "/accounts/new1/cookie", good)
+    assert status == 200 and body["ok"] is True
+    saved = json.loads((tmp_path / "new1" / "config.json").read_text(encoding="utf-8"))
+    assert saved["cookies"] == "c_user=1; xs=good;"
+    await asyncio.sleep(0)
+    assert started == ["shop", "new1"]
+
+    assert (await manager.handle("POST", "/accounts/shop/restart", b""))[0] == 202
+    await asyncio.sleep(0)
+    assert started == ["shop", "new1", "shop"]
+    assert (await manager.handle("DELETE", "/accounts/new1", b""))[0] == 204
+    assert not (tmp_path / "new1").exists()
+    assert "new1" not in multi_main._account_states
+    gate.set()
+    await asyncio.gather(*manager.tasks.values())

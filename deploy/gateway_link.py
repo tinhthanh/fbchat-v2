@@ -20,7 +20,7 @@ import json
 import os
 import time
 from collections import OrderedDict
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
 import httpx
@@ -323,6 +323,10 @@ class GatewayLink:
         # "tài khoản:threadKey" -> {contactId: isAdmin}: thành viên nhóm đã thấy, để
         # chỉ báo thay đổi thật chứ không báo cả danh sách mỗi lần đồng bộ.
         self._members: OrderedDict[str, dict[str, bool]] = OrderedDict()
+        # Route thêm trên cùng server HTTP (multi_main: /accounts), cùng token.
+        self.routes: (
+            Callable[[str, str, bytes], Awaitable[tuple[int, Any] | None]] | None
+        ) = None
 
     @classmethod
     def from_env(
@@ -498,6 +502,10 @@ class GatewayLink:
         """Tên/ảnh nhóm đã biết cho thread id của gateway (e2ee:<id>@g.us hoặc thread:<id>)."""
         key = thread_id.split(":", 1)[-1].split("@", 1)[0]
         return self._threads.get(f"{account}:{key}") or {}
+
+    async def user_profile(self, bot: _Bot, user_id: str) -> tuple[str, str]:
+        """(tên, ảnh đại diện) Facebook của user, có cache."""
+        return await self._user_profile(bot, user_id)
 
     async def _user_profile(self, bot: _Bot, user_id: str) -> tuple[str, str]:
         """Tên và ảnh đại diện Facebook của user; tra lại sau 1 giờ nếu lần trước
@@ -875,6 +883,7 @@ class GatewayLink:
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
         status, text = 500, "error"
+        content_type = "text/plain; charset=utf-8"
         try:
             request_line = await asyncio.wait_for(reader.readline(), timeout=10)
             headers: dict[str, str] = {}
@@ -886,7 +895,8 @@ class GatewayLink:
                 headers[name.strip().lower()] = value.strip()
             method, path, *_ = request_line.decode("latin-1").split()
             length = int(headers.get("content-length") or 0)
-            if method != "POST" or path != "/send":
+            is_send = method == "POST" and path == "/send"
+            if not is_send and self.routes is None:
                 status, text = 404, "not found"
             elif not hmac.compare_digest(
                 headers.get("authorization", ""), f"Bearer {self.token}"
@@ -894,6 +904,15 @@ class GatewayLink:
                 status, text = 401, "unauthorized"
             elif length > MAX_REQUEST_BYTES:
                 status, text = 413, "too large"
+            elif not is_send and self.routes is not None:
+                body = await asyncio.wait_for(reader.readexactly(length), timeout=10)
+                routed = await self.routes(method, path, body)
+                if routed is None:
+                    status, text = 404, "not found"
+                else:
+                    status = routed[0]
+                    text = "" if routed[1] is None else json.dumps(routed[1])
+                    content_type = "application/json"
             else:
                 body = await asyncio.wait_for(reader.readexactly(length), timeout=10)
                 try:
@@ -910,7 +929,7 @@ class GatewayLink:
         finally:
             data = text.encode()
             writer.write(
-                f"HTTP/1.1 {status} X\r\nContent-Type: text/plain; charset=utf-8\r\n"
+                f"HTTP/1.1 {status} X\r\nContent-Type: {content_type}\r\n"
                 f"Content-Length: {len(data)}\r\nConnection: close\r\n\r\n".encode()
                 + data
             )

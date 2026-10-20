@@ -22,7 +22,7 @@ RUN apk add --no-cache \
     && echo '{"DeveloperToolsAvailability": 2, "PasswordManagerEnabled": false}' \
         > /etc/chromium/policies/managed/fbchat.json
 
-COPY --chmod=0755 extract_cookie.py /usr/local/bin/extract_cookie.py
+COPY --chmod=0755 extract_cookie.py control.py /usr/local/bin/
 
 USER fbchat
 WORKDIR /home/fbchat

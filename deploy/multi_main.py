@@ -17,11 +17,13 @@ Tài khoản lỗi được thử lại với backoff và không làm dừng tà
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import contextvars
 import gc
 import json
 import os
 import re
+import shutil
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -61,6 +63,8 @@ COMMANDS_FLAG = os.environ.get("BOT_COMMANDS", "").lower() in {"1", "true", "yes
 _gateway: GatewayLink | None = None
 
 _account_states: dict[str, str] = {}
+# tên tài khoản -> {"uid", "displayName", "avatar"}: hiển thị ở trang "Tài khoản kênh".
+_account_profiles: dict[str, dict[str, str]] = {}
 
 # Tên tài khoản gắn vào log; task con và asyncio.to_thread kế thừa context.
 LOG_LABEL: contextvars.ContextVar[str] = contextvars.ContextVar(
@@ -173,9 +177,12 @@ class AccountBot(SimpleBot):
         super()._queue_event(event)
 
 
-def set_account_state(name: str, state: str) -> None:
-    """Ghi nhận starting/running/retrying/dropped và ghi file health nếu bật."""
-    _account_states[name] = state
+def set_account_state(name: str, state: str | None) -> None:
+    """Ghi nhận starting/running/retrying/dropped (None: xoá) và ghi file health."""
+    if state is None:
+        _account_states.pop(name, None)
+    else:
+        _account_states[name] = state
     if not HEALTH_FILE:
         return
     target = Path(HEALTH_FILE)
@@ -240,6 +247,12 @@ async def run_account(
     )
     if _gateway is not None:
         await _gateway.register(name, bot)
+    uid = str(dataFB.get("FacebookID") or "")
+    _account_profiles[name] = {"uid": uid, "displayName": "", "avatar": ""}
+    if _gateway is not None and uid:
+        with contextlib.suppress(Exception):  # chỉ để hiển thị
+            display_name, avatar = await _gateway.user_profile(bot, uid)
+            _account_profiles[name].update(displayName=display_name, avatar=avatar)
     ready_task = asyncio.create_task(_notify_when_ready(bot, on_ready))
     try:
         await bot.run()
@@ -314,35 +327,135 @@ async def supervise_account(
             await asyncio.sleep(delay)
 
 
+class AccountManager:
+    """Chạy/dừng từng tài khoản khi bot đang chạy (trang "Tài khoản kênh")."""
+
+    def __init__(self, root: Path, http_client: httpx.AsyncClient) -> None:
+        self.root = root
+        self.http_client = http_client
+        self.tasks: dict[str, asyncio.Task[bool]] = {}
+
+    def start(self, name: str) -> asyncio.Task[bool]:
+        task = self.tasks.get(name)
+        if task is not None and not task.done():
+            return task
+        task = asyncio.create_task(
+            supervise_account(name, self.root / name, self.http_client),
+            name=f"account-{name}",
+        )
+        self.tasks[name] = task
+        return task
+
+    async def stop(self, name: str) -> None:
+        task = self.tasks.pop(name, None)
+        if task is not None and not task.done():
+            # Hủy task: SimpleBot.run() dừng bridge trong finally.
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+        set_account_state(name, None)
+        _account_profiles.pop(name, None)
+
+    async def restart(self, name: str) -> None:
+        await self.stop(name)
+        self.start(name)
+
+    def list(self) -> list[dict[str, Any]]:
+        names = {n for n, _ in discover_accounts(self.root)} | set(_account_states)
+        return [
+            {
+                "name": n,
+                "state": _account_states.get(n, "stopped"),
+                "profile": _account_profiles.get(n),
+            }
+            for n in sorted(names)
+        ]
+
+    async def set_cookie(self, name: str, cookie: str) -> tuple[int, str]:
+        """Kiểm tra cookie với Facebook rồi lưu và chạy lại tài khoản."""
+        names = {p.partition("=")[0].strip() for p in cookie.split(";") if "=" in p}
+        if not {"c_user", "xs"} <= names:
+            return 400, "Cookie phải có c_user và xs."
+        data_fb = await dataGetHome(cookie)
+        gc.collect()
+        if data_fb is None or not is_valid_datafb(data_fb):
+            return 422, "Facebook không chấp nhận cookie này (hết hạn hoặc sai)."
+        account_dir = self.root / name
+        account_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        config_path = account_dir / "config.json"
+        FileSessionStorage(str(config_path), key="cookies").save(cookie.strip())
+        set_private_file_permissions(config_path)
+        log("multi", f"Đã lưu cookie mới cho tài khoản {name}.")
+        await self.restart(name)
+        return 200, "ok"
+
+    async def remove(self, name: str) -> None:
+        await self.stop(name)
+        shutil.rmtree(self.root / name, ignore_errors=True)
+        log("multi", f"Đã gỡ tài khoản {name} và xoá dữ liệu đăng nhập.")
+
+    async def handle(
+        self, method: str, path: str, body: bytes
+    ) -> tuple[int, Any] | None:
+        """Route /accounts cho gateway; None nếu không phải route này."""
+        parts = [p for p in path.split("?", 1)[0].split("/") if p]
+        if not parts or parts[0] != "accounts":
+            return None
+        if len(parts) == 1 and method == "GET":
+            return 200, self.list()
+        name = parts[1] if len(parts) > 1 else ""
+        if not ACCOUNT_NAME_PATTERN.match(name):
+            return 400, {"error": "Tên tài khoản không hợp lệ."}
+        action = parts[2] if len(parts) > 2 else ""
+        if action == "cookie" and method == "POST":
+            try:
+                payload = json.loads(body or b"{}")
+            except ValueError:
+                return 400, {"error": "JSON không hợp lệ."}
+            cookie = payload.get("cookie") if isinstance(payload, dict) else None
+            if not isinstance(cookie, str) or not cookie.strip():
+                return 400, {"error": "Thiếu cookie."}
+            status, message = await self.set_cookie(name, cookie)
+            return status, {"ok": status == 200, "message": message}
+        if action == "restart" and method == "POST":
+            if not (self.root / name / "config.json").is_file():
+                return 404, {"error": "Chưa có tài khoản này."}
+            await self.restart(name)
+            return 202, {"ok": True}
+        if action == "" and method == "DELETE":
+            await self.remove(name)
+            return 204, None
+        return 404, {"error": "not found"}
+
+
 async def main() -> None:
     install_labeled_log()
     accounts = discover_accounts(ACCOUNTS_DIR)
-    if not accounts:
-        raise RuntimeError(
-            f"Không có tài khoản nào trong {ACCOUNTS_DIR} (cần <tên>/config.json)."
-        )
-    log("multi", f"Chạy {len(accounts)} tài khoản: {', '.join(n for n, _ in accounts)}")
+    log(
+        "multi",
+        f"Chạy {len(accounts)} tài khoản: "
+        f"{', '.join(n for n, _ in accounts) or '(chưa có)'}",
+    )
     global _gateway
     async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         _gateway = GatewayLink.from_env(http_client, log)
+        if _gateway is None and not accounts:
+            raise RuntimeError(
+                f"Không có tài khoản nào trong {ACCOUNTS_DIR} (cần <tên>/config.json)."
+            )
+        manager = AccountManager(ACCOUNTS_DIR, http_client)
+        set_account_state("", None)  # ghi file health ngay cả khi chưa có tài khoản
         if _gateway is not None:
+            _gateway.routes = manager.handle
             await _gateway.serve(BOT_HTTP_PORT)
-        results = await asyncio.gather(
-            *(
-                supervise_account(name, account_dir, http_client)
-                for name, account_dir in accounts
-            )
-        )
-        if not any(results):
-            # Không thoát: với restart policy unless-stopped, thoát sẽ khiến
-            # Docker restart và gọi lại Facebook bằng cookie hỏng mãi mãi.
-            # Giữ tiến trình sống để healthcheck báo unhealthy.
-            log(
-                "multi",
-                "❌ Mọi tài khoản đã bị bỏ; đăng nhập lại bằng dịch vụ login "
-                "rồi restart bot.",
-            )
-            await asyncio.Event().wait()
+        tasks = [manager.start(n) for n, _ in accounts]
+        if _gateway is None:
+            await asyncio.gather(*tasks)
+            return
+        # Không await các task: trang "Tài khoản kênh" có thể dừng/chạy lại
+        # (hủy task) bất cứ lúc nào. Tài khoản bị bỏ vẫn giữ tiến trình sống để
+        # healthcheck báo unhealthy thay vì Docker restart với cookie hỏng mãi mãi.
+        await asyncio.Event().wait()
 
 
 def main_blocking() -> None:
