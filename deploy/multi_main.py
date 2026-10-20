@@ -65,6 +65,27 @@ _gateway: GatewayLink | None = None
 _account_states: dict[str, str] = {}
 # tên tài khoản -> {"uid", "displayName", "avatar"}: hiển thị ở trang "Tài khoản kênh".
 _account_profiles: dict[str, dict[str, str]] = {}
+# tên tài khoản -> {"kind", "message"}: lỗi gần nhất, để trang biết cần đăng nhập
+# lại ("session_expired") hay chỉ là lỗi kết nối ("connection").
+_account_errors: dict[str, dict[str, str]] = {}
+
+SESSION_EXPIRED_MESSAGE = (
+    "Phiên Facebook đã hết hạn hoặc bị đăng xuất: cần đăng nhập lại."
+)
+
+
+class SessionExpiredError(RuntimeError):
+    """Cookie không còn cho ra dataFB: Facebook đã huỷ phiên."""
+
+
+def describe_account_error(error: BaseException) -> dict[str, str]:
+    if isinstance(error, SessionExpiredError):
+        return {"kind": "session_expired", "message": SESSION_EXPIRED_MESSAGE}
+    return {
+        "kind": "connection",
+        "message": f"Lỗi kết nối: {_format_exception_chain(error)}"[:200],
+    }
+
 
 # Tên tài khoản gắn vào log; task con và asyncio.to_thread kế thừa context.
 LOG_LABEL: contextvars.ContextVar[str] = contextvars.ContextVar(
@@ -232,7 +253,7 @@ async def run_account(
     # bot rảnh có thể giữ nó rất lâu. Dọn ngay để không nhân lên theo số tài khoản.
     gc.collect()
     if dataFB is None or not is_valid_datafb(dataFB):
-        raise RuntimeError(
+        raise SessionExpiredError(
             "Không lấy được dataFB hợp lệ; cookie đã hết hạn hoặc HTML token đã đổi."
         )
     bot = AccountBot(
@@ -302,12 +323,13 @@ async def supervise_account(
                 name,
                 account_dir,
                 http_client,
-                on_ready=lambda: set_account_state(name, "running"),
+                on_ready=lambda: _mark_running(name),
             )
             return True
         except Exception as error:
             # Bắt rộng để lỗi của một tài khoản không làm dừng tài khoản khác;
             # CancelledError là BaseException nên vẫn được lan ra khi shutdown.
+            _account_errors[name] = describe_account_error(error)
             attempt = 1 if loop.time() - started >= stable_after else attempt + 1
             if attempt >= max_attempts:
                 set_account_state(name, "dropped")
@@ -325,6 +347,11 @@ async def supervise_account(
                 f"({attempt}/{max_attempts}).",
             )
             await asyncio.sleep(delay)
+
+
+def _mark_running(name: str) -> None:
+    _account_errors.pop(name, None)
+    set_account_state(name, "running")
 
 
 class AccountManager:
@@ -355,6 +382,7 @@ class AccountManager:
                 await task
         set_account_state(name, None)
         _account_profiles.pop(name, None)
+        _account_errors.pop(name, None)
 
     async def restart(self, name: str) -> None:
         await self.stop(name)
@@ -367,6 +395,7 @@ class AccountManager:
                 "name": n,
                 "state": _account_states.get(n, "stopped"),
                 "profile": _account_profiles.get(n),
+                "error": _account_errors.get(n),
             }
             for n in sorted(names)
         ]

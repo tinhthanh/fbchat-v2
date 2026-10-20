@@ -93,7 +93,7 @@ The bot's HTTP server (same `GATEWAY_TOKEN` as `/send`) also serves routes for t
 
 | Route | Action |
 |---|---|
-| `GET /accounts` | Accounts: `name`, `state` (`starting`, `running`, `retrying`, `dropped`, `stopped`), `profile` (`uid`, `displayName`, `avatar`) |
+| `GET /accounts` | Accounts: `name`, `state` (`starting`, `running`, `retrying`, `dropped`, `stopped`), `profile` (`uid`, `displayName`, `avatar`), `error` (last error: `session_expired` when the cookie no longer yields dataFB, sign in again; `connection` otherwise) |
 | `POST /accounts/<name>/cookie` `{"cookie": "..."}` | The cookie must contain `c_user` and `xs`; the bot runs `dataGetHome` to check it with Facebook (422 when rejected, nothing saved), then writes `config.json` (0600) and starts the account |
 | `POST /accounts/<name>/restart` | Reconnect (also used after a browser sign-in) |
 | `DELETE /accounts/<name>` | Stop and delete the account directory |

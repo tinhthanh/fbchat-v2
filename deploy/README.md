@@ -93,7 +93,7 @@ Server HTTP của bot (cùng `GATEWAY_TOKEN` với `/send`) có thêm các route
 
 | Route | Việc |
 |---|---|
-| `GET /accounts` | Danh sách: `name`, `state` (`starting`, `running`, `retrying`, `dropped`, `stopped`), `profile` (`uid`, `displayName`, `avatar`) |
+| `GET /accounts` | Danh sách: `name`, `state` (`starting`, `running`, `retrying`, `dropped`, `stopped`), `profile` (`uid`, `displayName`, `avatar`), `error` (lỗi gần nhất: `session_expired` khi cookie không còn cho ra dataFB, cần đăng nhập lại; `connection` cho lỗi khác) |
 | `POST /accounts/<tên>/cookie` `{"cookie": "..."}` | Cookie phải có `c_user` và `xs`; bot gọi `dataGetHome` để kiểm tra với Facebook (422 nếu bị từ chối, không lưu), rồi ghi `config.json` (0600) và chạy tài khoản |
 | `POST /accounts/<tên>/restart` | Kết nối lại (cũng dùng sau khi đăng nhập bằng trình duyệt) |
 | `DELETE /accounts/<tên>` | Dừng và xoá thư mục tài khoản |

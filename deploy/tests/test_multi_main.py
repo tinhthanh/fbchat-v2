@@ -333,3 +333,37 @@ async def test_account_manager_routes_cookie_restart_and_remove(
     assert "new1" not in multi_main._account_states
     gate.set()
     await asyncio.gather(*manager.tasks.values())
+
+
+@pytest.mark.asyncio
+async def test_last_error_says_whether_to_sign_in_again(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    async def fake_run_account(
+        name: str, *_: Any, on_ready: Any = None, **__: Any
+    ) -> None:
+        if name == "expired":
+            raise multi_main.SessionExpiredError("dataFB")
+        if name == "flaky":
+            raise RuntimeError("bridge closed")
+        on_ready()
+
+    monkeypatch.setattr(multi_main, "run_account", fake_run_account)
+    monkeypatch.setattr(multi_main, "_account_errors", {"ok": {"kind": "connection"}})
+    monkeypatch.setattr(multi_main, "_account_states", {})
+    for name in ("expired", "flaky", "ok"):
+        await multi_main.supervise_account(
+            name, tmp_path, object(), max_attempts=1, retry_base=0  # type: ignore[arg-type]
+        )
+    errors = multi_main._account_errors
+    assert errors["expired"] == {
+        "kind": "session_expired",
+        "message": multi_main.SESSION_EXPIRED_MESSAGE,
+    }
+    assert errors["flaky"]["kind"] == "connection"
+    assert "bridge closed" in errors["flaky"]["message"]
+    assert "ok" not in errors  # chạy được thì xoá lỗi cũ
+    manager = multi_main.AccountManager(tmp_path, object())  # type: ignore[arg-type]
+    listed = {a["name"]: a for a in manager.list()}
+    assert listed["expired"]["error"]["kind"] == "session_expired"
+    assert listed["ok"]["error"] is None
