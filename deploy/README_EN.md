@@ -48,7 +48,7 @@ FORCE_LOGIN=1 ACCOUNT=acc2 docker compose run --rm --service-ports login  # sign
 
 - All accounts share one Python process, event loop and `httpx.AsyncClient`. Each account still gets its own Go bridge process because the bridge supports a single client.
 - Log lines carry the account name, for example `[acc2] [bot] ...`. Lines printed by the bridge itself are not labelled yet.
-- A failing account is retried with backoff (30 seconds, doubling, capped at 10 minutes) and dropped after 5 consecutive failures without stopping the other accounts. The counter resets when the previous run lasted 10 minutes or more.
+- A failing account is retried with backoff (30 seconds, doubling) without stopping the other accounts. Only a **really expired session** (Facebook reachable but the cookie no longer yields dataFB) stops after 2 attempts; network loss, bridge errors… are retried forever, at most every 2 minutes, so the account reconnects once the network is back. `dataGetHome` also returns `None` when offline, so the bot fetches `facebook.com/robots.txt` (no cookie) to tell the two apart. The counter resets when the previous run lasted 10 minutes or more.
 - Account names may contain only letters, digits, `_`, `.` and `-` (up to 64 characters, starting with a letter or digit). To remove an account, stop the bot, delete `/data/accounts/<name>` in the volume and start the bot again.
 
 ## 🩺 Healthcheck and restarts

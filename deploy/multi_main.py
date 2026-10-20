@@ -53,6 +53,10 @@ ACCOUNT_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 MAX_ATTEMPTS = 5
 RETRY_BASE_SECONDS = 30.0
 RETRY_MAX_SECONDS = 600.0
+# Mất mạng / lỗi kết nối: không bao giờ bỏ tài khoản, thử lại tối đa mỗi 2 phút
+# để có mạng lại là tự kết nối (chỉ phiên hết hạn thật mới dừng).
+OFFLINE_RETRY_SECONDS = 120.0
+FACEBOOK_PROBE_URL = "https://www.facebook.com/robots.txt"
 STABLE_AFTER_SECONDS = 600.0
 # File trạng thái cho Docker healthcheck; healthy khi mọi tài khoản là "running".
 HEALTH_FILE = os.environ.get("FBCHAT_HEALTH_FILE")
@@ -82,6 +86,15 @@ SESSION_EXPIRED_MESSAGE = (
 
 class SessionExpiredError(RuntimeError):
     """Cookie không còn cho ra dataFB: Facebook đã huỷ phiên."""
+
+
+async def facebook_reachable(http_client: httpx.AsyncClient) -> bool:
+    """True nếu tới được Facebook (không gửi cookie): phân biệt mất mạng với hết phiên."""
+    try:
+        await http_client.get(FACEBOOK_PROBE_URL, timeout=10)
+    except httpx.HTTPError:
+        return False
+    return True
 
 
 def describe_account_error(error: BaseException) -> dict[str, str]:
@@ -276,6 +289,10 @@ async def run_account(
     # bot rảnh có thể giữ nó rất lâu. Dọn ngay để không nhân lên theo số tài khoản.
     gc.collect()
     if dataFB is None or not is_valid_datafb(dataFB):
+        # dataGetHome trả None cả khi mất mạng: chỉ coi là hết phiên khi vẫn
+        # tới được Facebook.
+        if not await facebook_reachable(http_client):
+            raise ConnectionError("Không kết nối được Facebook (mất mạng?).")
         raise SessionExpiredError(
             "Không lấy được dataFB hợp lệ; cookie đã hết hạn hoặc HTML token đã đổi."
         )
@@ -361,7 +378,8 @@ async def supervise_account(
                 if isinstance(error, SessionExpiredError)
                 else max_attempts
             )
-            if attempt >= limit:
+            expired = isinstance(error, SessionExpiredError)
+            if expired and attempt >= limit:
                 set_account_state(name, "dropped")
                 log(
                     "multi",
@@ -371,10 +389,15 @@ async def supervise_account(
                 return False
             set_account_state(name, "retrying")
             delay = min(retry_base * 2 ** (attempt - 1), RETRY_MAX_SECONDS)
+            if not expired:
+                delay = min(delay, OFFLINE_RETRY_SECONDS)
+            counter = (
+                f"{attempt}/{limit}" if expired or attempt < limit else f"lần {attempt}"
+            )
             log(
                 "multi",
                 f"❌ {_format_exception_chain(error)}; thử lại sau {delay:.0f}s "
-                f"({attempt}/{limit}).",
+                f"({counter}).",
             )
             await asyncio.sleep(delay)
 

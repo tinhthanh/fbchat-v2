@@ -155,9 +155,19 @@ async def test_run_account_rejects_invalid_session(
     async def fake_data_get_home(**_: Any) -> None:
         return None
 
-    monkeypatch.setattr(multi_main, "dataGetHome", fake_data_get_home)
+    reachable = {"ok": True}
 
-    with pytest.raises(RuntimeError, match="dataFB"):
+    async def fake_reachable(_: Any) -> bool:
+        return reachable["ok"]
+
+    monkeypatch.setattr(multi_main, "dataGetHome", fake_data_get_home)
+    monkeypatch.setattr(multi_main, "facebook_reachable", fake_reachable)
+
+    with pytest.raises(multi_main.SessionExpiredError, match="dataFB"):
+        await multi_main.run_account("acc1", account_dir, object())  # type: ignore[arg-type]
+    # Mất mạng: dataGetHome cũng trả None nhưng không phải hết phiên.
+    reachable["ok"] = False
+    with pytest.raises(ConnectionError):
         await multi_main.run_account("acc1", account_dir, object())  # type: ignore[arg-type]
 
 
@@ -207,7 +217,7 @@ async def test_failing_account_gives_up_without_stopping_others(
     async def fake_run_account(name: str, *_: Any, **__: Any) -> None:
         calls[name] += 1
         if name == "bad":
-            raise RuntimeError("cookie expired")
+            raise multi_main.SessionExpiredError("cookie expired")
 
     monkeypatch.setattr(multi_main, "run_account", fake_run_account)
 
@@ -221,7 +231,7 @@ async def test_failing_account_gives_up_without_stopping_others(
     )
 
     assert results == [False, True]
-    assert calls == {"bad": 3, "good": 1}
+    assert calls == {"bad": multi_main.SESSION_EXPIRED_ATTEMPTS, "good": 1}
 
 
 @pytest.mark.asyncio
@@ -262,7 +272,7 @@ async def test_health_file_tracks_running_and_dropped_accounts(
 
     async def fake_run_account(name: str, *_: Any, on_ready: Any = None) -> None:
         if name == "bad":
-            raise RuntimeError("cookie expired")
+            raise multi_main.SessionExpiredError("cookie expired")
         on_ready()
         seen_while_running.append(json.loads(health.read_text(encoding="utf-8")))
 
@@ -345,16 +355,29 @@ async def test_last_error_says_whether_to_sign_in_again(
         if name == "expired":
             raise multi_main.SessionExpiredError("dataFB")
         if name == "flaky":
+            if flaky_calls:
+                await asyncio.Event().wait()  # lần sau: đang thử lại, chưa xong
+            flaky_calls.append(1)
             raise RuntimeError("bridge closed")
         on_ready()
 
     monkeypatch.setattr(multi_main, "run_account", fake_run_account)
     monkeypatch.setattr(multi_main, "_account_errors", {"ok": {"kind": "connection"}})
     monkeypatch.setattr(multi_main, "_account_states", {})
-    for name in ("expired", "flaky", "ok"):
+    flaky_calls: list[int] = []
+    for name in ("expired", "ok"):
         await multi_main.supervise_account(
             name, tmp_path, object(), max_attempts=1, retry_base=0  # type: ignore[arg-type]
         )
+    # Lỗi kết nối không bao giờ bỏ tài khoản: vẫn đang thử lại.
+    flaky = asyncio.create_task(
+        multi_main.supervise_account(
+            "flaky", tmp_path, object(), max_attempts=1, retry_base=0  # type: ignore[arg-type]
+        )
+    )
+    await asyncio.sleep(0.05)
+    assert multi_main._account_states["flaky"] in ("starting", "retrying")
+    flaky.cancel()
     errors = multi_main._account_errors
     assert errors["expired"] == {
         "kind": "session_expired",
@@ -409,3 +432,26 @@ def test_account_list_fills_name_from_contacts(
         "displayName": "Shop Hai",
         "avatar": "https://cdn/s.jpg",
     }
+
+
+@pytest.mark.asyncio
+async def test_offline_account_keeps_retrying_until_network_returns(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls = {"n": 0}
+
+    async def fake_run_account(
+        name: str, *_: Any, on_ready: Any = None, **__: Any
+    ) -> None:
+        calls["n"] += 1
+        if calls["n"] <= 7:  # quá max_attempts: trước đây bị bỏ
+            raise ConnectionError("Không kết nối được Facebook (mất mạng?).")
+        on_ready()
+
+    monkeypatch.setattr(multi_main, "run_account", fake_run_account)
+    monkeypatch.setattr(multi_main, "_account_states", {})
+    ok = await multi_main.supervise_account(
+        "offline", tmp_path, object(), max_attempts=3, retry_base=0  # type: ignore[arg-type]
+    )
+    assert ok is True and calls["n"] == 8
+    assert multi_main._account_states["offline"] == "running"
