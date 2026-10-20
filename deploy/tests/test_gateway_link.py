@@ -222,10 +222,16 @@ async def test_http_server_requires_token_and_sends() -> None:
             missing = await client.post(
                 "/other", json=body, headers={"Authorization": f"Bearer {TOKEN}"}
             )
+            react = await client.post(
+                "/react",
+                json={"account": "acc1", "thread_id": "thread:9", "message_id": "m1", "emoji": "👍"},
+                headers={"Authorization": f"Bearer {TOKEN}"},
+            )
     finally:
         server.close()
         await server.wait_closed()
     assert (bad.status_code, good.status_code, missing.status_code) == (401, 200, 404)
+    assert react.status_code == 200  # /react phải qua được bộ lọc route HTTP
     assert bot.listener.regular == [(9, "xin chào")]
 
 
@@ -1166,3 +1172,30 @@ async def test_reaction_removal_and_owner_reaction_carry_badge_fields(
     events = [c[1] for c in calls if c[0] == "/v1/event"]
     assert [(e["reaction"], e["reactor_id"]) for e in events] == [("", "7"), ("😆", "self")]
     assert events[0]["text"].startswith("(bỏ cảm xúc)")
+
+
+@pytest.mark.asyncio
+async def test_agent_reaction_goes_through_the_bridge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(gateway_link._get_user_info, "func", _names)
+    link, _ = _recording_link()
+    bot = _Bot()
+    link.bots["acc1"] = bot
+    await link.forward(
+        "acc1",
+        bot,
+        {"messageID": "m1", "userID": "7", "body": "hi", "chatJid": "7@msgr", "senderJid": "7.0@msgr"},
+    )
+    bridge = bot.listener._bridge
+    ok = await link.react({"account": "acc1", "thread_id": "e2ee:7@msgr", "message_id": "m1", "emoji": "❤️"})
+    gone = await link.react({"account": "acc1", "thread_id": "thread:55", "message_id": "m9", "emoji": ""})
+    assert ok[0] == 200 and gone[0] == 200
+    assert bridge.calls[-2] == (
+        "sendE2EEReaction",
+        {"chatJid": "7@msgr", "messageId": "m1", "senderJid": "7.0@msgr", "emoji": "❤"},
+    )
+    assert bridge.calls[-1] == ("sendReaction", {"threadId": 55, "messageId": "m9", "emoji": ""})
+    bad = await link.react({"account": "acc1", "thread_id": "x", "message_id": "m1", "emoji": "❤"})
+    assert bad[0] == 400
+    assert (await link.react({"account": "nope", "thread_id": "e2ee:7@msgr", "message_id": "m1", "emoji": "❤"}))[0] == 404

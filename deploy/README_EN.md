@@ -90,6 +90,7 @@ With `GATEWAY_URL` and `GATEWAY_TOKEN` (at least 32 characters) set, `multi_main
 ### Quoting and recalling agent replies
 
 - `POST /send` also takes `reply_to` (messageID of a customer message): the bot sends a quoted reply (`send_e2ee_message(..., reply_to_id, reply_to_sender_jid)` or `send_message(..., reply_to_id)`), the sender JID coming from the cache of the last 4096 messages. It returns `{"ok": true, "message_ids": [...]}`.
+- `POST /react {account, thread_id, message_id, emoji}`: an agent reacts to a customer message through the `sendE2EEReaction` RPC (needs the original sender JID; the customer in 1-1 chats) or `sendReaction`; empty `emoji` removes, FE0F is stripped (Messenger uses ❤).
 - `POST /recall {account, thread_id, message_ids}`: `unsendE2EEMessage` / `unsendMessage` through `BridgeActions`; the `messageUnsend` event of that message is not noted twice.
 
 ### Editing, customer state and messaging first

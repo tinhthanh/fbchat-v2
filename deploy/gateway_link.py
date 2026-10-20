@@ -1106,6 +1106,54 @@ class GatewayLink:
         self.log("gateway", f"Đã thu hồi tin nhân viên ({len(ids)} tin).")
         return 200, json.dumps({"ok": True})
 
+    async def react(self, payload: dict[str, Any]) -> tuple[int, str]:
+        """Nhân viên thả cảm xúc lên tin khách (gateway gọi POST /react); emoji
+        rỗng là bỏ cảm xúc."""
+        account = str(payload.get("account") or "")
+        bot = self.bots.get(account)
+        if bot is None:
+            return 404, "unknown account"
+        thread_id = str(payload.get("thread_id") or "")
+        kind, _, target = thread_id.partition(":")
+        message_id = str(payload.get("message_id") or "")
+        emoji = payload.get("emoji")
+        if not message_id or not isinstance(emoji, str) or len(emoji) > 16:
+            return 400, "invalid payload"
+        if kind not in ("e2ee", "thread") or not target:
+            return 400, "invalid payload"
+        bridge = _bridge_of(bot)
+        if bridge is None:
+            return 502, "bridge not ready"
+        emoji = emoji.replace("\ufe0f", "")  # Messenger dùng ❤ không kèm FE0F
+        try:
+            if kind == "e2ee":
+                cached = self._recent.get(f"{account}:{message_id}") or {}
+                # Cảm xúc E2EE cần JID người gửi tin gốc; chat 1-1 thì là khách.
+                sender = cached.get("sender_jid") or (
+                    "" if cached.get("is_group") else target
+                )
+                if not sender:
+                    return 409, "Bot không còn nhớ người gửi tin này."
+                await bridge.call(
+                    "sendE2EEReaction",
+                    {
+                        "chatJid": target,
+                        "messageId": message_id,
+                        "senderJid": sender,
+                        "emoji": emoji,
+                    },
+                )
+            else:
+                await bridge.call(
+                    "sendReaction",
+                    {"threadId": int(target), "messageId": message_id, "emoji": emoji},
+                )
+        except Exception as error:  # bridge/Facebook từ chối
+            self.log("gateway", f"❌ Thả cảm xúc thất bại: {error}")
+            return 502, f"Facebook không thả được cảm xúc: {error}"
+        self.log("gateway", "Nhân viên đã thả cảm xúc." if emoji else "Nhân viên đã bỏ cảm xúc.")
+        return 200, json.dumps({"ok": True})
+
     def _after_send(
         self, account: str, result: dict[str, Any], thread_id: str, summary: str
     ) -> str:
@@ -1145,6 +1193,7 @@ class GatewayLink:
                 "/recall",
                 "/edit",
                 "/resolve",
+                "/react",
             )
             if not is_send and self.routes is None:
                 status, text = 404, "not found"
@@ -1174,8 +1223,10 @@ class GatewayLink:
                         "/recall",
                         "/edit",
                         "/resolve",
+                        "/react",
                     ):
                         handler = {
+                            "/react": self.react,
                             "/recall": self.recall,
                             "/edit": self.edit,
                             "/resolve": self.resolve,

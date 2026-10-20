@@ -90,6 +90,7 @@ Khi đặt `GATEWAY_URL` và `GATEWAY_TOKEN` (ít nhất 32 ký tự), `multi_ma
 ### Trích dẫn và thu hồi tin nhân viên
 
 - `POST /send` nhận thêm `reply_to` (messageID tin khách): bot gửi trả lời có trích dẫn (`send_e2ee_message(..., reply_to_id, reply_to_sender_jid)` hoặc `send_message(..., reply_to_id)`), JID người gửi lấy từ bộ nhớ 4096 tin gần nhất. Trả về `{"ok": true, "message_ids": [...]}`.
+- `POST /react {account, thread_id, message_id, emoji}`: nhân viên thả cảm xúc lên tin khách qua RPC `sendE2EEReaction` (cần JID người gửi tin gốc; chat 1-1 thì là khách) hoặc `sendReaction`; `emoji` rỗng là bỏ, FE0F được bỏ đi (Messenger dùng ❤).
 - `POST /recall {account, thread_id, message_ids}`: `unsendE2EEMessage` / `unsendMessage` qua `BridgeActions`; sự kiện `messageUnsend` của chính tin đó không ghi chú lặp.
 
 ### Sửa tin, trạng thái khách và nhắn trước
