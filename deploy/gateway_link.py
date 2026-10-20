@@ -324,7 +324,7 @@ class GatewayLink:
         # "tài khoản:threadKey" -> {contactId: isAdmin}: thành viên nhóm đã thấy, để
         # chỉ báo thay đổi thật chứ không báo cả danh sách mỗi lần đồng bộ.
         self._members: OrderedDict[str, dict[str, bool]] = OrderedDict()
-        # messageId các tin bot thu hồi theo yêu cầu nhân viên: gateway đã ghi chú.
+        # "tài khoản:messageId" các tin bot thu hồi theo yêu cầu nhân viên: gateway đã ghi chú.
         self._recalled: OrderedDict[str, None] = OrderedDict()
         # Route thêm trên cùng server HTTP (multi_main: /accounts), cùng token.
         self.routes: (
@@ -693,7 +693,7 @@ class GatewayLink:
             )
         elif (
             kind == "messageUnsend"
-            and str(data.get("messageId") or "") in self._recalled
+            and f"{account}:{data.get('messageId') or ''}" in self._recalled
         ):
             return
         elif kind == "messageUnsend":
@@ -904,7 +904,9 @@ class GatewayLink:
         actions = BridgeActions(bridge)  # type: ignore[arg-type]
         try:
             for message_id in ids:
-                self._recalled[message_id] = None
+                # Theo tài khoản: một tiến trình chạy nhiều tài khoản, tài khoản
+                # nhận (khách) vẫn phải ghi chú tin bị thu hồi.
+                self._recalled[f"{account}:{message_id}"] = None
                 while len(self._recalled) > RECENT_MAX:
                     self._recalled.popitem(last=False)
                 if kind == "e2ee":

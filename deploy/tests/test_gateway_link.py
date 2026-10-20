@@ -925,6 +925,16 @@ async def test_send_returns_ids_and_recall_unsends_without_duplicate_note(
         },
     )
     assert not [c for c in calls if c[0] == "/v1/event"]
+    # Tài khoản kia (khách, cùng tiến trình) vẫn ghi chú tin bị thu hồi.
+    await link.handle_meta(
+        "acc2",
+        bot,  # type: ignore[arg-type]
+        {
+            "type": "messageUnsend",
+            "data": {"messageId": "mid.out", "threadId": "9@msgr", "isE2EE": True},
+        },
+    )
+    assert [c[1]["kind"] for c in calls if c[0] == "/v1/event"] == ["recall"]
     assert (
         await link.recall(
             {"account": "nope", "thread_id": "e2ee:8@msgr", "message_ids": ["x"]}
