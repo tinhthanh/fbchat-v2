@@ -136,6 +136,7 @@ async def test_forward_posts_inbound_with_names(
         "attachments": [],
         "quote": "",
         "thread_avatar": "",
+        "sender_avatar": "https://cdn/7.jpg",
     }
     assert sent[1]["thread_id"] == "e2ee:8@msgr" and sent[1]["thread_name"] == "User 8"
     # 1-1: ảnh đại diện của người nhắn; nhóm thì chưa có.

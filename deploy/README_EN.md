@@ -87,7 +87,7 @@ With `GATEWAY_URL` and `GATEWAY_TOKEN` (at least 32 characters) set, `multi_main
 
 - Quotes: E2EE messages only carry `replyTo.messageId`, so the bot caches the last 4096 messages per account (key `account:messageId`) to send `quote` = `Name: text`.
 - Stickers are downloaded as images; locations become a Google Maps link; links carry their description.
-- Avatars: 1-1 chats send `thread_avatar` = the sender's `thumbSrc` (from the same lookup as the name); Facebook groups have no picture yet.
+- Avatars: 1-1 chats send `thread_avatar` = the sender's `thumbSrc` (from the same lookup as the name); Facebook groups have no group picture yet but send each member's `sender_avatar` so the UI can show member avatars.
 - `AccountBot._forward_listener_event` intercepts `e2eeReaction`, `reaction`, `messageEdit` and `messageUnsend` (dropped by the upstream SimpleBot) and sends them to `POST /v1/event`, where they become private notes.
 - Messages whose `senderId` is the account itself (sent from another device) become `owner_message` notes; messages the bot sent through `/send` are recognised by the returned `messageId` or by matching text within 60 seconds.
 - Facebook names that cannot be looked up (hidden profile / not friends) use the label `Facebook <id>` and are retried after an hour.

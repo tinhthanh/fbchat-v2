@@ -569,6 +569,7 @@ class GatewayLink:
                     "quote": self._quote(account, message),
                     # Nhóm Facebook: chưa có API ảnh nhóm, Libredesk dùng chữ viết tắt.
                     "thread_avatar": "" if is_group else avatar,
+                    "sender_avatar": avatar,
                 },
             )
         except httpx.HTTPError as error:
