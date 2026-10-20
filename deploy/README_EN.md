@@ -94,13 +94,13 @@ The bot's HTTP server (same `GATEWAY_TOKEN` as `/send`) also serves routes for t
 | Route | Action |
 |---|---|
 | `GET /accounts` | Accounts: `name`, `state` (`starting`, `running`, `retrying`, `dropped`, `stopped`), `profile` (`uid`, `displayName`, `avatar`), `error` (last error: `session_expired` when the cookie no longer yields dataFB, sign in again; `connection` otherwise) |
-| `POST /accounts/<name>/cookie` `{"cookie": "..."}` | The cookie must contain `c_user` and `xs`; the bot runs `dataGetHome` to check it with Facebook (422 when rejected, nothing saved), then writes `config.json` (0600) and starts the account |
+| `POST /accounts/<name>/cookie` `{"cookie": "..."}` | Internal only (the UI signs in with the browser). The cookie must contain `c_user` and `xs`; the bot runs `dataGetHome` to check it with Facebook (422 when rejected, nothing saved), then writes `config.json` (0600) and starts the account |
 | `POST /accounts/<name>/restart` | Reconnect (also used after a browser sign-in) |
 | `DELETE /accounts/<name>` | Stop and delete the account directory |
 
 `AccountManager` (in `multi_main.py`) runs each account in its own task; stopping or reconnecting cancels the task and `SimpleBot.run()` stops the bridge. With the gateway enabled the bot also starts with no accounts.
 
-Browser sign-in uses the `fb-login-ui` service (`login/` image, `control.py` command): idle it is only the control server (~20 MiB); `POST /session {"account"}` runs `extract_cookie.py` with `FORCE_LOGIN=1` (Chromium + noVNC on port 6080), `GET /session` reports `starting` until noVNC accepts connections, then `running`, and `success` once the cookie is written; `DELETE /session` cancels. One session at a time; the Chromium profile is wiped before and after each session so the next account never inherits cookies. The control server requires `GATEWAY_TOKEN` and does not log URLs or headers.
+Browser sign-in uses the `fb-login-ui` service (`login/` image, `control.py` command): idle it is only the control server (~20 MiB); `POST /session {"account"}` runs `extract_cookie.py` with `FORCE_LOGIN=1` (Chromium + noVNC on port 6080), `GET /session` reports `starting` until noVNC accepts connections, then `running`, `saving` once `extract_cookie.py` saw the sign-in and closed Chromium to flush cookies, and `success` once the cookie is written; `DELETE /session` cancels. One session at a time; the Chromium profile is wiped before and after each session so the next account never inherits cookies. The control server requires `GATEWAY_TOKEN` and does not log URLs or headers.
 
 ### Rich content and events
 

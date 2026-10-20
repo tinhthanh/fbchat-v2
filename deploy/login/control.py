@@ -50,7 +50,20 @@ def _set(status: str, message: str, account: str | None = None) -> None:
     _state.update(status=status, message=message, at=time.time())
 
 
+# extract_cookie.py in dòng này khi thấy c_user/xs và đóng Chromium để ghi cookie
+# (~30 giây, noVNC hiện "Aw, Snap!"): giao diện ẩn trình duyệt và báo đang lưu.
+LOGIN_DETECTED_MARKER = "Đã phát hiện đăng nhập"
+
+
 def _watch(proc: subprocess.Popen[bytes], account: str) -> None:
+    assert proc.stdout is not None
+    for raw in proc.stdout:  # log của extract_cookie.py (không chứa cookie)
+        line = raw.decode("utf-8", "replace").rstrip()
+        print(line, flush=True)
+        if LOGIN_DETECTED_MARKER in line:
+            with _lock:
+                if _proc is proc and _state["status"] == "running":
+                    _set("saving", "Đã đăng nhập, đang lưu cookie (khoảng 30 giây)...")
     code = proc.wait()
     with _lock:
         if _proc is not proc:
@@ -94,7 +107,12 @@ def start(account: str) -> tuple[int, dict[str, Any]]:
         if not running:
             shutil.rmtree(PROFILE_DIR, ignore_errors=True)
             env = {**os.environ, "ACCOUNT": account, "FORCE_LOGIN": "1"}
-            _proc = subprocess.Popen([sys.executable, str(SCRIPT)], env=env)
+            _proc = subprocess.Popen(
+                [sys.executable, str(SCRIPT)],
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
             _set("running", "Đăng nhập Facebook trong khung trình duyệt.", account)
             threading.Thread(target=_watch, args=(_proc, account), daemon=True).start()
             log(f"Bắt đầu phiên đăng nhập cho {account}.")

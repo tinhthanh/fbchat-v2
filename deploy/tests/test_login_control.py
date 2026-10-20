@@ -27,6 +27,8 @@ def fake_login(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "assert os.environ['FORCE_LOGIN'] == '1'\n"
         "while not done.exists():\n"
         "    time.sleep(0.05)\n"
+        "print('[login] Đã phát hiện đăng nhập, đóng Chromium...', flush=True)\n"
+        "time.sleep(0.3)\n"
         "sys.exit(0)\n",
         encoding="utf-8",
     )
@@ -66,6 +68,7 @@ def test_session_lifecycle(fake_login: Path, monkeypatch: pytest.MonkeyPatch) ->
     assert control.snapshot()["status"] == "running"
 
     fake_login.write_text("1")
+    _wait(lambda: control.snapshot()["status"] == "saving")
     _wait(lambda: control.snapshot()["status"] == "success")
     assert control.snapshot()["account"] == "shop1"
 
