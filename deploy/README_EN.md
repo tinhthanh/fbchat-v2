@@ -87,6 +87,11 @@ With `GATEWAY_URL` and `GATEWAY_TOKEN` (at least 32 characters) set, `multi_main
 - Regular (non-E2EE) messages sent while the bot was down: the bridge drops messages older than the connect time, and the sync on connect does not resend missed messages either (Messenger loads them only when a thread is opened), so they are not recovered yet. New Facebook chats are E2EE, which the bridge resyncs itself.
 - A reply the bridge does not confirm (deliveryStatus UNKNOWN) still returns 200 so the gateway does not resend it and the customer does not get duplicates.
 
+### Quoting and recalling agent replies
+
+- `POST /send` also takes `reply_to` (messageID of a customer message): the bot sends a quoted reply (`send_e2ee_message(..., reply_to_id, reply_to_sender_jid)` or `send_message(..., reply_to_id)`), the sender JID coming from the cache of the last 4096 messages. It returns `{"ok": true, "message_ids": [...]}`.
+- `POST /recall {account, thread_id, message_ids}`: `unsendE2EEMessage` / `unsendMessage` through `BridgeActions`; the `messageUnsend` event of that message is not noted twice.
+
 ### Account management (/accounts)
 
 The bot's HTTP server (same `GATEWAY_TOKEN` as `/send`) also serves routes for the Libredesk **Channel accounts** page; the gateway calls them, browsers never do:

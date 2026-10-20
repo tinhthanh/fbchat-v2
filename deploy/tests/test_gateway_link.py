@@ -30,6 +30,7 @@ class _Listener:
     def __init__(self) -> None:
         self.e2ee: list[tuple[str, str]] = []
         self.regular: list[tuple[int, str]] = []
+        self.reply_args: list[tuple[Any, ...]] = []
         self.fail = False
         self.result: dict[str, Any] = {"messageId": "mid.out"}
 
@@ -42,12 +43,14 @@ class _Listener:
         if self.fail:
             raise RuntimeError("bridge down")
         self.e2ee.append((chat_jid, text))
+        self.reply_args.append(args)
         return self.result
 
     async def send_message(
         self, thread_id: int, text: str, *args: Any
     ) -> dict[str, Any]:
         self.regular.append((thread_id, text))
+        self.reply_args.append(args)
         return self.result
 
 
@@ -150,15 +153,17 @@ async def test_send_reply_routes_by_thread_prefix_and_dedupes() -> None:
     bot = _Bot()
     link.bots["acc1"] = bot  # type: ignore[assignment]
 
-    assert await link.send_reply(
+    status, _ = await link.send_reply(
         {"account": "acc1", "thread_id": "e2ee:8@msgr", "text": "a", "message_id": "r1"}
-    ) == (200, "ok")
+    )
+    assert status == 200
     assert await link.send_reply(
         {"account": "acc1", "thread_id": "e2ee:8@msgr", "text": "a", "message_id": "r1"}
     ) == (200, "duplicate")
-    assert await link.send_reply(
+    status, _ = await link.send_reply(
         {"account": "acc1", "thread_id": "thread:9", "text": "b", "message_id": "r2"}
-    ) == (200, "ok")
+    )
+    assert status == 200
     assert (
         await link.send_reply(
             {
@@ -190,7 +195,7 @@ async def test_send_reply_bridge_error_allows_retry() -> None:
     }
     assert (await link.send_reply(payload))[0] == 502
     bot.listener.fail = False
-    assert await link.send_reply(payload) == (200, "ok")
+    assert (await link.send_reply(payload))[0] == 200
 
 
 @pytest.mark.asyncio
@@ -346,7 +351,7 @@ async def test_send_reply_sends_text_then_files() -> None:
             {"name": "a.pdf", "content_type": "application/pdf", "data": "UERG"}
         ],
     }
-    assert await link.send_reply(payload) == (200, "ok")
+    assert (await link.send_reply(payload))[0] == 200
     assert bot.listener.e2ee == [("8@msgr", "gửi bạn file")]
     assert [c[0] for c in bot.listener._bridge.calls] == ["sendE2EEDocument"]  # type: ignore[attr-defined]
 
@@ -359,7 +364,7 @@ async def test_send_reply_sends_text_then_files() -> None:
             {"name": "p.jpg", "content_type": "image/jpeg", "data": "SlBH"}
         ],
     }
-    assert await link.send_reply(only_file) == (200, "ok")
+    assert (await link.send_reply(only_file))[0] == 200
     assert bot.listener.regular == []
     bad = {
         **only_file,
@@ -845,3 +850,83 @@ async def test_undecryptable_message_becomes_placeholder(
         _wm("Receipt", {"Info": info}),
     ):
         assert gateway_link.undecryptable_message(skipped) is None
+
+
+@pytest.mark.asyncio
+async def test_quoted_reply_uses_original_message_and_sender(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(gateway_link._get_user_info, "func", _names)
+    link = _link(lambda r: httpx.Response(200))
+    bot = _Bot()
+    link.bots["acc1"] = bot  # type: ignore[assignment]
+    customer = {
+        "messageID": "mid.c1",
+        "userID": "42",
+        "body": "giá?",
+        "chatJid": "42@msgr",
+        "senderJid": "42.0:3@msgr",
+        "type": "e2ee",
+    }
+    await link.forward("acc1", bot, customer)  # type: ignore[arg-type]
+    reply = {"account": "acc1", "thread_id": "e2ee:42@msgr", "text": "Dạ 5 triệu"}
+    await link.send_reply({**reply, "message_id": "r1", "reply_to": "mid.c1"})
+    # Tin gốc không còn trong bộ nhớ: gửi thường, không trích dẫn.
+    await link.send_reply({**reply, "message_id": "r2", "reply_to": "mid.gone"})
+    assert bot.listener.reply_args == [("mid.c1", "42.0:3@msgr"), ()]
+
+
+@pytest.mark.asyncio
+async def test_send_returns_ids_and_recall_unsends_without_duplicate_note(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append((request.url.path, json.loads(request.content)))
+        return httpx.Response(200)
+
+    unsent: list[tuple[str, ...]] = []
+
+    class _Actions:
+        def __init__(self, bridge: Any) -> None:
+            pass
+
+        async def unsend_e2ee_message(
+            self, chat_jid: str, message_id: str
+        ) -> dict[str, Any]:
+            unsent.append(("e2ee", chat_jid, message_id))
+            return {}
+
+        async def unsend_message(self, message_id: str) -> dict[str, Any]:
+            unsent.append(("thread", message_id))
+            return {}
+
+    monkeypatch.setattr(gateway_link, "BridgeActions", _Actions)
+    link = _link(handler)
+    bot = _Bot()
+    bot.listener._bridge = _FakeBridge()  # type: ignore[attr-defined]
+    link.bots["acc1"] = bot  # type: ignore[assignment]
+    status, body = await link.send_reply(
+        {"account": "acc1", "thread_id": "e2ee:8@msgr", "text": "a", "message_id": "r1"}
+    )
+    assert status == 200 and json.loads(body)["message_ids"] == ["mid.out"]
+    status, _ = await link.recall(
+        {"account": "acc1", "thread_id": "e2ee:8@msgr", "message_ids": ["mid.out"]}
+    )
+    assert status == 200 and unsent == [("e2ee", "8@msgr", "mid.out")]
+    # Messenger báo lại sự kiện thu hồi của chính tin đó: không ghi chú lặp.
+    await link.handle_meta(
+        "acc1",
+        bot,  # type: ignore[arg-type]
+        {
+            "type": "messageUnsend",
+            "data": {"messageId": "mid.out", "threadId": "8@msgr", "isE2EE": True},
+        },
+    )
+    assert not [c for c in calls if c[0] == "/v1/event"]
+    assert (
+        await link.recall(
+            {"account": "nope", "thread_id": "e2ee:8@msgr", "message_ids": ["x"]}
+        )
+    )[0] == 404

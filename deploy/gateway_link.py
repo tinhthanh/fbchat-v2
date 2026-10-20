@@ -24,6 +24,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
 import httpx
+from _messaging._bridge_actions import BridgeActions
 
 from _features._facebook import _get_user_info
 
@@ -323,6 +324,8 @@ class GatewayLink:
         # "tài khoản:threadKey" -> {contactId: isAdmin}: thành viên nhóm đã thấy, để
         # chỉ báo thay đổi thật chứ không báo cả danh sách mỗi lần đồng bộ.
         self._members: OrderedDict[str, dict[str, bool]] = OrderedDict()
+        # messageId các tin bot thu hồi theo yêu cầu nhân viên: gateway đã ghi chú.
+        self._recalled: OrderedDict[str, None] = OrderedDict()
         # Route thêm trên cùng server HTTP (multi_main: /accounts), cùng token.
         self.routes: (
             Callable[[str, str, bytes], Awaitable[tuple[int, Any] | None]] | None
@@ -688,6 +691,11 @@ class GatewayLink:
                 text,
                 f"{message_id}-{data.get('editCount', '')}",
             )
+        elif (
+            kind == "messageUnsend"
+            and str(data.get("messageId") or "") in self._recalled
+        ):
+            return
         elif kind == "messageUnsend":
             raw_thread = str(data.get("threadId") or "")
             thread_id = cached.get("thread_id") or (
@@ -754,6 +762,8 @@ class GatewayLink:
                 "sender": sender_name,
                 "thread_id": thread_id,
                 "is_group": is_group,
+                # Trả lời trích dẫn E2EE cần JID người gửi tin gốc.
+                "sender_jid": str(message.get("senderJid") or ""),
             },
         )
         raw = _raw(message)
@@ -834,18 +844,32 @@ class GatewayLink:
             "until": asyncio.get_running_loop().time() + ECHO_WINDOW_SECONDS,
         }
         self._pending.append(pending)
+        # Nhân viên trả lời trích dẫn: gateway gửi reply_to = messageID của tin khách.
+        reply_to = str(payload.get("reply_to") or "")
+        quoted = self._recent.get(f"{account}:{reply_to}") if reply_to else None
         try:
             if text.strip() and kind == "e2ee":
-                result = await bot.listener.send_e2ee_message(target, text)
+                if quoted is not None:
+                    result = await bot.listener.send_e2ee_message(
+                        target, text, reply_to, str(quoted.get("sender_jid") or "")
+                    )
+                else:
+                    result = await bot.listener.send_e2ee_message(target, text)
             elif text.strip():
-                result = await bot.listener.send_message(int(target), text)
-            self._after_send(account, result, thread_id, text)
+                result = await bot.listener.send_message(
+                    int(target), text, reply_to if quoted is not None else ""
+                )
+            sent_ids: list[str] = []
+            if text.strip():
+                sent_ids.append(self._after_send(account, result, thread_id, text))
             for f in files:
                 method, params = media_rpc(kind, target, f)
                 assert bridge is not None
                 result = await bridge.call(method, params, MEDIA_RPC_TIMEOUT)
-                self._after_send(
-                    account, result, thread_id, f"[Tệp] {f.get('name', '')}"
+                sent_ids.append(
+                    self._after_send(
+                        account, result, thread_id, f"[Tệp] {f.get('name', '')}"
+                    )
                 )
         except Exception as error:  # lỗi bridge/mạng: để gateway thử lại
             self._recent_replies.pop(message_id, None)
@@ -860,11 +884,42 @@ class GatewayLink:
         else:
             suffix = f" ({len(files)} tệp)" if files else ""
             self.log("gateway", f"Đã gửi tin trả lời của nhân viên{suffix}.")
-        return 200, "ok"
+        # Gateway giữ các id này để nhân viên thu hồi tin sau.
+        return 200, json.dumps({"ok": True, "message_ids": [i for i in sent_ids if i]})
+
+    async def recall(self, payload: dict[str, Any]) -> tuple[int, str]:
+        """Thu hồi tin nhân viên đã gửi (gateway gọi POST /recall)."""
+        account = str(payload.get("account") or "")
+        bot = self.bots.get(account)
+        if bot is None:
+            return 404, "unknown account"
+        thread_id = str(payload.get("thread_id") or "")
+        kind, _, target = thread_id.partition(":")
+        ids = [str(i) for i in (payload.get("message_ids") or []) if i]
+        if not ids or kind not in ("e2ee", "thread") or not target:
+            return 400, "invalid payload"
+        bridge = _bridge_of(bot)
+        if bridge is None:
+            return 502, "bridge not ready"
+        actions = BridgeActions(bridge)  # type: ignore[arg-type]
+        try:
+            for message_id in ids:
+                self._recalled[message_id] = None
+                while len(self._recalled) > RECENT_MAX:
+                    self._recalled.popitem(last=False)
+                if kind == "e2ee":
+                    await actions.unsend_e2ee_message(target, message_id)
+                else:
+                    await actions.unsend_message(message_id)
+        except Exception as error:  # bridge/Facebook từ chối
+            self.log("gateway", f"❌ Thu hồi thất bại: {error}")
+            return 502, f"Facebook không thu hồi được: {error}"
+        self.log("gateway", f"Đã thu hồi tin nhân viên ({len(ids)} tin).")
+        return 200, json.dumps({"ok": True})
 
     def _after_send(
         self, account: str, result: dict[str, Any], thread_id: str, summary: str
-    ) -> None:
+    ) -> str:
         sent_id = result.get("messageId") or result.get("id")
         self._mark_bot_sent(sent_id)
         if sent_id and summary.strip():
@@ -878,6 +933,7 @@ class GatewayLink:
                     "is_group": False,
                 },
             )
+        return str(sent_id or "")
 
     async def _handle_connection(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
@@ -895,7 +951,7 @@ class GatewayLink:
                 headers[name.strip().lower()] = value.strip()
             method, path, *_ = request_line.decode("latin-1").split()
             length = int(headers.get("content-length") or 0)
-            is_send = method == "POST" and path == "/send"
+            is_send = method == "POST" and path in ("/send", "/recall")
             if not is_send and self.routes is None:
                 status, text = 404, "not found"
             elif not hmac.compare_digest(
@@ -920,8 +976,16 @@ class GatewayLink:
                 except ValueError:
                     status, text = 400, "invalid json"
                 else:
-                    if isinstance(payload, dict):
+                    if isinstance(payload, dict) and path == "/recall":
+                        status, text = await self.recall(payload)
+                        content_type = (
+                            "application/json" if status == 200 else content_type
+                        )
+                    elif isinstance(payload, dict):
                         status, text = await self.send_reply(payload)
+                        content_type = (
+                            "application/json" if status == 200 else content_type
+                        )
                     else:
                         status, text = 400, "invalid json"
         except (ValueError, asyncio.TimeoutError, asyncio.IncompleteReadError):

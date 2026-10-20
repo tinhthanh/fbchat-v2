@@ -87,6 +87,11 @@ Khi đặt `GATEWAY_URL` và `GATEWAY_TOKEN` (ít nhất 32 ký tự), `multi_ma
 - Tin chat thường (không E2EE) gửi lúc bot không chạy: bridge bỏ tin cũ hơn lúc kết nối, và đợt đồng bộ khi kết nối cũng không gửi lại tin bị lỡ (Messenger chỉ tải khi mở hội thoại), nên chưa lấy lại được. Chat Facebook mới đều là E2EE, bridge tự đồng bộ lại.
 - Tin trả lời không có xác nhận từ bridge (deliveryStatus UNKNOWN) vẫn trả 200 để gateway không gửi lại, tránh khách nhận trùng.
 
+### Trích dẫn và thu hồi tin nhân viên
+
+- `POST /send` nhận thêm `reply_to` (messageID tin khách): bot gửi trả lời có trích dẫn (`send_e2ee_message(..., reply_to_id, reply_to_sender_jid)` hoặc `send_message(..., reply_to_id)`), JID người gửi lấy từ bộ nhớ 4096 tin gần nhất. Trả về `{"ok": true, "message_ids": [...]}`.
+- `POST /recall {account, thread_id, message_ids}`: `unsendE2EEMessage` / `unsendMessage` qua `BridgeActions`; sự kiện `messageUnsend` của chính tin đó không ghi chú lặp.
+
 ### Quản lý tài khoản (/accounts)
 
 Server HTTP của bot (cùng `GATEWAY_TOKEN` với `/send`) có thêm các route cho trang **Channel accounts** của Libredesk; gateway gọi, trình duyệt không gọi trực tiếp:
