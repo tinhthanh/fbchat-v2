@@ -12,6 +12,7 @@ import gateway_link
 import main as upstream_main
 import multi_main
 from gateway_link import (
+    audio_seconds,
     GatewayLink,
     describe_attachment,
     describe_message,
@@ -330,10 +331,10 @@ def test_media_rpc_picks_method_by_chat_and_mime() -> None:
         media_rpc("e2ee", "8@msgr", {**img, "content_type": "video/mp4"})[0]
         == "sendE2EEVideo"
     )
-    assert (
-        media_rpc("e2ee", "8@msgr", {**img, "content_type": "audio/mpeg"})[0]
-        == "sendE2EEAudio"
-    )
+    method, params = media_rpc("e2ee", "8@msgr", {**img, "content_type": "audio/mpeg"})
+    # Audio đi thành tin thoại (ptt); mp3 không đọc được thời lượng thì 0.
+    assert method == "sendE2EEAudio" and params["ptt"] is True
+    assert params["duration"] == 0
     method, params = media_rpc("thread", "9", img)
     assert (
         method == "sendImage"
@@ -1199,3 +1200,22 @@ async def test_agent_reaction_goes_through_the_bridge(
     bad = await link.react({"account": "acc1", "thread_id": "x", "message_id": "m1", "emoji": "❤"})
     assert bad[0] == 400
     assert (await link.react({"account": "nope", "thread_id": "e2ee:7@msgr", "message_id": "m1", "emoji": "❤"}))[0] == 404
+
+
+def _box(kind: bytes, body: bytes) -> bytes:
+    return (8 + len(body)).to_bytes(4, "big") + kind + body
+
+
+def test_audio_seconds_reads_mp4_and_ogg() -> None:
+    mvhd0 = _box(b"mvhd", bytes(4) + bytes(8) + (1000).to_bytes(4, "big") + (2500).to_bytes(4, "big"))
+    mp4 = _box(b"ftyp", b"M4A " + bytes(4)) + _box(b"moov", mvhd0)
+    assert audio_seconds(mp4, "audio/mp4") == 3  # 2,5 giây làm tròn lên
+    mvhd1 = _box(b"mvhd", b"\x01" + bytes(3) + bytes(16) + (600).to_bytes(4, "big") + (6000).to_bytes(8, "big"))
+    assert audio_seconds(_box(b"moov", mvhd1), "audio/mp4") == 10
+    page = b"OggS" + bytes(2) + (48000 * 4).to_bytes(8, "little") + bytes(10)
+    assert audio_seconds(b"OggS" + bytes(30) + page, "audio/ogg; codecs=opus") == 4
+    assert audio_seconds("rác".encode(), "audio/mp4") == 0
+    assert audio_seconds(b"", "audio/ogg") == 0
+    b64 = base64.b64encode(mp4).decode()
+    method, params = media_rpc("e2ee", "8@msgr", {"name": "a.m4a", "content_type": "audio/mp4", "data": b64})
+    assert method == "sendE2EEAudio" and params["ptt"] is True and params["duration"] == 3

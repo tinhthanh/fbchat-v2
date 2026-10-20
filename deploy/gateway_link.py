@@ -304,6 +304,48 @@ async def fetch_attachment(
     }
 
 
+def audio_seconds(raw: bytes, mime: str) -> int:
+    """Thời lượng (giây, làm tròn lên) của audio m4a/mp4 hoặc ogg opus; 0 nếu
+    không đọc được. Messenger hiện thời lượng của tin thoại từ số này."""
+    try:
+        if "ogg" in mime:
+            last = raw.rfind(b"OggS")
+            if last < 0 or len(raw) < last + 14:
+                return 0
+            granule = int.from_bytes(raw[last + 6 : last + 14], "little")
+            return max(1, -(-granule // 48000)) if granule > 0 else 0  # opus: 48 kHz
+        return _mp4_seconds(raw, 0, len(raw))
+    except (ValueError, IndexError):
+        return 0
+
+
+def _mp4_seconds(raw: bytes, start: int, end: int) -> int:
+    pos = start
+    while pos + 8 <= end:
+        size = int.from_bytes(raw[pos : pos + 4], "big")
+        box = raw[pos + 4 : pos + 8]
+        header = 8
+        if size == 1:
+            size, header = int.from_bytes(raw[pos + 8 : pos + 16], "big"), 16
+        elif size == 0:
+            size = end - pos
+        if size < header:
+            return 0
+        if box == b"moov":
+            return _mp4_seconds(raw, pos + header, pos + size)
+        if box == b"mvhd":
+            body = pos + header
+            if raw[body] == 1:
+                scale = int.from_bytes(raw[body + 20 : body + 24], "big")
+                duration = int.from_bytes(raw[body + 24 : body + 32], "big")
+            else:
+                scale = int.from_bytes(raw[body + 12 : body + 16], "big")
+                duration = int.from_bytes(raw[body + 16 : body + 20], "big")
+            return max(1, -(-duration // scale)) if scale and duration else 0
+        pos += size
+    return 0
+
+
 def media_rpc(
     kind: str, target: str, file: dict[str, Any]
 ) -> tuple[str, dict[str, Any]]:
@@ -332,7 +374,9 @@ def media_rpc(
                 **reply,
             }
         if mime.startswith("audio/"):
-            return "sendE2EEAudio", {**common, "duration": 0, "ptt": False, **reply}
+            # ptt: gửi thành tin thoại (bấm nghe trong chat), không phải tệp audio.
+            seconds = audio_seconds(base64.b64decode(data or b""), mime)
+            return "sendE2EEAudio", {**common, "duration": seconds, "ptt": True, **reply}
         return "sendE2EEDocument", {**common, "filename": name, **reply}
     thread = {
         "threadId": int(target),
