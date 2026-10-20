@@ -81,6 +81,7 @@ With `GATEWAY_URL` and `GATEWAY_TOKEN` (at least 32 characters) set, `multi_main
 - `thread_id` sent to the gateway: `e2ee:<chatJid>` for encrypted chats, `thread:<threadId>` for regular chats; groups are detected from `threadType`.
 - Sender names come from `_get_user_info` and are cached.
 - Attachments (image, video, audio, file): the bot downloads them through `downloadE2EEMedia` (encrypted chats) or `downloadMedia` (regular chats) and sends them to the gateway as base64; agent files go out through `sendE2EEImage`/`sendE2EEVideo`/`sendE2EEAudio`/`sendE2EEDocument` or `sendImage`/`sendFile`. Stickers, links and locations become a one-line description. Per-file limit `GATEWAY_MAX_FILE_MB` (default 20).
+- E2EE kinds the bridge cannot read yet (contact cards, polls, view-once, live location...) arrive as empty messages: the bot sends the line `❓ Loại tin chưa hỗ trợ: xem trên Messenger` instead of dropping them. Empty regular messages are still skipped.
 - A reply the bridge does not confirm (deliveryStatus UNKNOWN) still returns 200 so the gateway does not resend it and the customer does not get duplicates.
 
 ### Rich content and events

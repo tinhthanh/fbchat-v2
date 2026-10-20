@@ -737,3 +737,19 @@ async def test_e2ee_group_name_and_picture_from_raw_tables(
         "picture": "https://cdn/g2.jpg",
     }
     assert link.group_info("acc2", "e2ee:3858@g.us") == {"name": "Khác"}
+
+
+@pytest.mark.asyncio
+async def test_unsupported_e2ee_content_becomes_placeholder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def no_name(dataFB: dict[str, Any], user_id: str, **_: Any) -> dict[str, Any]:
+        return {"error": 1}
+
+    monkeypatch.setattr(gateway_link._get_user_info, "func", no_name)
+    link, calls = _recording_link()
+    empty = {"userID": "42", "body": None, "attachments": [], "chatJid": "42@msgr"}
+    await link.forward("shop", _Bot(), {**empty, "messageID": "m1", "type": "e2ee"})
+    # Tin thường rỗng (sự kiện hệ thống) vẫn bỏ qua.
+    await link.forward("shop", _Bot(), {**empty, "messageID": "m2", "type": "thread"})
+    assert [c[1]["text"] for c in calls] == [gateway_link.UNSUPPORTED_E2EE_TEXT]

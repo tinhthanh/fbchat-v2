@@ -43,6 +43,9 @@ META_EVENT_TYPES = frozenset(
     {"e2eeReaction", "reaction", "messageEdit", "messageUnsend"}
 )
 ECHO_WINDOW_SECONDS = 60.0
+# Bridge gửi tin E2EE không có chữ/file cho loại nó chưa đọc được (danh thiếp,
+# bình chọn, xem một lần, vị trí trực tiếp...): báo thay vì bỏ qua im lặng.
+UNSUPPORTED_E2EE_TEXT = "❓ Loại tin chưa hỗ trợ: xem trên Messenger"
 OWNER = "Chủ tài khoản"
 # mediaType cho downloadE2EEMedia (bridge nhận image/video/audio/voice/file/sticker).
 E2EE_MEDIA_TYPE = {"gif": "video"}
@@ -582,6 +585,8 @@ class GatewayLink:
                 files.append(file)
             else:
                 parts.append(describe_attachment(attachment))
+        if not parts and not files and message.get("type") == "e2ee":
+            parts.append(UNSUPPORTED_E2EE_TEXT)
         return "\n".join(parts), files
 
     async def forward(self, account: str, bot: _Bot, message: dict[str, Any]) -> None:
