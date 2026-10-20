@@ -37,7 +37,7 @@ from _core._storage import FileSessionStorage
 from _messaging._listening_e2ee import _format_exception_chain
 from main import DEFAULT_HTTP_TIMEOUT, SimpleBot, is_valid_datafb
 
-from gateway_link import META_EVENT_TYPES, GatewayLink
+from gateway_link import META_EVENT_TYPES, GatewayLink, undecryptable_message
 
 ACCOUNTS_DIR = Path(
     os.environ.get("FBCHAT_ACCOUNTS_DIR", Path(__file__).resolve().parent / "accounts")
@@ -140,13 +140,18 @@ class AccountBot(SimpleBot):
         ):
             # Bảng LightSpeed mang tên/ảnh/thành viên nhóm (tin E2EE thì không).
             changes = _gateway.observe_raw(self.account, event)
-            if changes:
-                try:
+            lost = undecryptable_message(event)
+            try:
+                if changes:
                     asyncio.run_coroutine_threadsafe(
                         _gateway.post_group_changes(self.account, self, changes), loop
                     )
-                except RuntimeError:
-                    pass  # loop đã đóng khi đang tắt
+                if lost is not None:
+                    asyncio.run_coroutine_threadsafe(
+                        _gateway.forward(self.account, self, lost), loop
+                    )
+            except RuntimeError:
+                pass  # loop đã đóng khi đang tắt
         if (
             _gateway is not None
             and isinstance(event, dict)

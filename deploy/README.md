@@ -82,6 +82,8 @@ Khi đặt `GATEWAY_URL` và `GATEWAY_TOKEN` (ít nhất 32 ký tự), `multi_ma
 - Tên người gửi lấy bằng `_get_user_info` và được cache.
 - File đính kèm (ảnh, video, audio, file): bot tải qua `downloadE2EEMedia` (chat mã hóa) hoặc `downloadMedia` (chat thường) rồi gửi kèm base64 cho gateway; file nhân viên gửi đi bằng `sendE2EEImage`/`sendE2EEVideo`/`sendE2EEAudio`/`sendE2EEDocument` hoặc `sendImage`/`sendFile`. Sticker, link, vị trí chỉ chuyển thành dòng mô tả. Giới hạn mỗi tệp `GATEWAY_MAX_FILE_MB` (mặc định 20).
 - Loại tin E2EE bridge chưa đọc được (danh thiếp, bình chọn, xem một lần, vị trí trực tiếp...) đến dưới dạng tin rỗng: bot gửi dòng `❓ Loại tin chưa hỗ trợ: xem trên Messenger` thay vì bỏ qua. Tin thường rỗng vẫn bỏ qua.
+- Tin E2EE không giải mã được: bridge chỉ phát lỗi chung, nhưng sự kiện `raw` của whatsmeow (`UndecryptableMessage`) có chat, người gửi và ID tin. Bot gửi tin `⚠️ Tin nhắn mã hóa không giải mã được: xem trên Messenger` vào đúng hội thoại (ID riêng `undecryptable-<id>`, nên nếu sau đó giải mã lại được thì tin thật vẫn vào). Bỏ qua tin của chính mình và loại `DecryptFailMode=hide`.
+- Tin chat thường (không E2EE) gửi lúc bot không chạy: bridge bỏ tin cũ hơn lúc kết nối, và đợt đồng bộ khi kết nối cũng không gửi lại tin bị lỡ (Messenger chỉ tải khi mở hội thoại), nên chưa lấy lại được. Chat Facebook mới đều là E2EE, bridge tự đồng bộ lại.
 - Tin trả lời không có xác nhận từ bridge (deliveryStatus UNKNOWN) vẫn trả 200 để gateway không gửi lại, tránh khách nhận trùng.
 
 ### Tin giàu nội dung và sự kiện

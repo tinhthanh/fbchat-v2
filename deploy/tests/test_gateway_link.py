@@ -816,3 +816,32 @@ async def test_group_changes_only_from_known_state(
         ("thread:38", "User 9 đã vào nhóm"),
     ]
     assert all(c[1]["kind"] == "group_event" and c[1]["is_group"] for c in calls)
+
+
+def _wm(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return {"type": "raw", "data": {"from": "whatsmeow", "type": kind, "data": payload}}
+
+
+@pytest.mark.asyncio
+async def test_undecryptable_message_becomes_placeholder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(gateway_link._get_user_info, "func", _names)
+    info = {"Chat": "385@g.us", "Sender": "42.0:3@msgr", "ID": "abc", "IsFromMe": False}
+    message = gateway_link.undecryptable_message(
+        _wm("UndecryptableMessage", {"Info": info})
+    )
+    assert message is not None and message["messageID"] == "undecryptable-abc"
+    assert message["userID"] == "42"
+    link, calls = _recording_link()
+    await link.forward("acc", _Bot(), message)
+    body = calls[0][1]
+    assert body["thread_id"] == "e2ee:385@g.us" and body["is_group"] is True
+    assert body["text"] == gateway_link.UNDECRYPTABLE_TEXT
+    assert body["sender_name"] == "User 42"
+    for skipped in (
+        _wm("UndecryptableMessage", {"Info": {**info, "IsFromMe": True}}),
+        _wm("UndecryptableMessage", {"Info": info, "DecryptFailMode": "hide"}),
+        _wm("Receipt", {"Info": info}),
+    ):
+        assert gateway_link.undecryptable_message(skipped) is None

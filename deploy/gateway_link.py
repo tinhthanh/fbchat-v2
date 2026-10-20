@@ -47,6 +47,12 @@ ECHO_WINDOW_SECONDS = 60.0
 # Bridge gửi tin E2EE không có chữ/file cho loại nó chưa đọc được (danh thiếp,
 # bình chọn, xem một lần, vị trí trực tiếp...): báo thay vì bỏ qua im lặng.
 UNSUPPORTED_E2EE_TEXT = "❓ Loại tin chưa hỗ trợ: xem trên Messenger"
+# Bridge chỉ phát lỗi chung cho tin E2EE không giải mã được; sự kiện raw của
+# whatsmeow (UndecryptableMessage) vẫn có chat, người gửi và ID tin.
+UNDECRYPTABLE_TEXT = (
+    "⚠️ Tin nhắn mã hóa không giải mã được: xem trên Messenger"
+    " (tin có thể tự đến sau khi giải mã lại)"
+)
 OWNER = "Chủ tài khoản"
 # mediaType cho downloadE2EEMedia (bridge nhận image/video/audio/voice/file/sticker).
 E2EE_MEDIA_TYPE = {"gif": "video"}
@@ -99,6 +105,39 @@ def _raw(message: dict[str, Any]) -> dict[str, Any]:
 def _rows(table: dict[str, Any], name: str) -> list[dict[str, Any]]:
     rows = table.get(name)
     return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+
+
+def _jid_user(jid: Any) -> str:
+    """ "100012.0:3@msgr" -> "100012" (phần user, bỏ agent/thiết bị)."""
+    if not isinstance(jid, str):
+        return ""
+    return jid.split("@", 1)[0].split(":", 1)[0].split(".", 1)[0]
+
+
+def undecryptable_message(event: dict[str, Any]) -> dict[str, Any] | None:
+    """Tin giả cho ``forward`` từ raw UndecryptableMessage; None nếu không cần báo."""
+    data = event.get("data")
+    if not isinstance(data, dict) or data.get("type") != "UndecryptableMessage":
+        return None
+    payload = data.get("data")
+    info = payload.get("Info") if isinstance(payload, dict) else None
+    if not isinstance(info, dict) or info.get("IsFromMe"):
+        return None
+    # "hide": loại tin client cũng không hiện (reaction, sửa tin... hỏng).
+    if payload.get("DecryptFailMode") == "hide":
+        return None
+    chat, message_id = info.get("Chat"), info.get("ID")
+    if not isinstance(chat, str) or "@" not in chat or not message_id:
+        return None
+    return {
+        # ID riêng: nếu sau đó giải mã lại được, tin thật không bị coi là trùng.
+        "messageID": f"undecryptable-{message_id}",
+        "userID": _jid_user(info.get("Sender")),
+        "body": UNDECRYPTABLE_TEXT,
+        "chatJid": chat,
+        "type": "e2ee",
+        "attachments": [],
+    }
 
 
 def thread_ref(message: dict[str, Any]) -> tuple[str, bool] | None:

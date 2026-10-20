@@ -82,6 +82,8 @@ With `GATEWAY_URL` and `GATEWAY_TOKEN` (at least 32 characters) set, `multi_main
 - Sender names come from `_get_user_info` and are cached.
 - Attachments (image, video, audio, file): the bot downloads them through `downloadE2EEMedia` (encrypted chats) or `downloadMedia` (regular chats) and sends them to the gateway as base64; agent files go out through `sendE2EEImage`/`sendE2EEVideo`/`sendE2EEAudio`/`sendE2EEDocument` or `sendImage`/`sendFile`. Stickers, links and locations become a one-line description. Per-file limit `GATEWAY_MAX_FILE_MB` (default 20).
 - E2EE kinds the bridge cannot read yet (contact cards, polls, view-once, live location...) arrive as empty messages: the bot sends the line `❓ Loại tin chưa hỗ trợ: xem trên Messenger` instead of dropping them. Empty regular messages are still skipped.
+- Undecryptable E2EE messages: the bridge only emits a generic error, but the whatsmeow `raw` event (`UndecryptableMessage`) carries the chat, sender and message ID. The bot sends `⚠️ Tin nhắn mã hóa không giải mã được: xem trên Messenger` into the right conversation (own ID `undecryptable-<id>`, so the real message still gets through if it is decrypted later). Own messages and `DecryptFailMode=hide` are skipped.
+- Regular (non-E2EE) messages sent while the bot was down: the bridge drops messages older than the connect time, and the sync on connect does not resend missed messages either (Messenger loads them only when a thread is opened), so they are not recovered yet. New Facebook chats are E2EE, which the bridge resyncs itself.
 - A reply the bridge does not confirm (deliveryStatus UNKNOWN) still returns 200 so the gateway does not resend it and the customer does not get duplicates.
 
 ### Rich content and events
