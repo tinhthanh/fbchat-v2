@@ -581,6 +581,10 @@ async def test_meta_events_become_notes(monkeypatch: pytest.MonkeyPatch) -> None
         events[0]["text"] == "❤️ vào tin «giá 5 triệu»"
         and events[0]["sender_name"] == "User 7"
     )
+    # Gateway dùng mấy trường này để hiện huy hiệu trên đúng tin.
+    assert events[0]["target_ids"] == ["m1"]
+    assert events[0]["reactor_id"] == "7"
+    assert events[0]["reaction"] == "❤️"
     assert events[1]["text"] == "«giá 5 triệu» → «giá 4 triệu»"
     assert events[2]["text"] == "«giá 4 triệu»"
 
@@ -1144,3 +1148,21 @@ async def test_resolve_recipient(monkeypatch: pytest.MonkeyPatch) -> None:
         "avatar": "",
     }
     assert (await link.resolve({"account": "acc1", "to": "some.name"}))[0] == 400
+
+
+@pytest.mark.asyncio
+async def test_reaction_removal_and_owner_reaction_carry_badge_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(gateway_link._get_user_info, "func", _names)
+    link, calls = _recording_link()
+    bot = _Bot()
+    own = str(bot.dataFB["FacebookID"])
+    for data in (
+        {"chatJid": "7@msgr", "messageId": "m2", "reaction": "", "senderId": 7},
+        {"chatJid": "7@msgr", "messageId": "m2", "reaction": "😆", "senderId": own},
+    ):
+        await link.handle_meta("acc1", bot, {"type": "e2eeReaction", "data": data})
+    events = [c[1] for c in calls if c[0] == "/v1/event"]
+    assert [(e["reaction"], e["reactor_id"]) for e in events] == [("", "7"), ("😆", "self")]
+    assert events[0]["text"].startswith("(bỏ cảm xúc)")

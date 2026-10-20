@@ -683,11 +683,13 @@ class GatewayLink:
         text: str,
         event_id: str,
         files: list[dict[str, str]] | None = None,
+        extra: dict[str, Any] | None = None,
     ) -> None:
         try:
             await self._post(
                 "/v1/event",
                 {
+                    **(extra or {}),
                     "channel": CHANNEL,
                     "account": account,
                     "thread_id": thread_id,
@@ -758,6 +760,8 @@ class GatewayLink:
             )
             target = f" vào tin «{cached['summary']}»" if cached.get("summary") else ""
             emoji = data.get("reaction") or "(bỏ cảm xúc)"
+            # Gateway gắn cảm xúc lên đúng tin trong Libredesk (huy hiệu như
+            # Messenger); không tìm được tin thì ghi chú bằng `text` như cũ.
             await self._post_event(
                 account,
                 thread_id,
@@ -766,6 +770,11 @@ class GatewayLink:
                 who,
                 f"{emoji}{target}",
                 f"{message_id}-{actor}-{emoji}",
+                extra={
+                    "target_ids": [message_id] if message_id else [],
+                    "reactor_id": "self" if actor == own_id else actor,
+                    "reaction": str(data.get("reaction") or ""),
+                },
             )
         elif kind == "messageEdit" and f"{account}:{message_id}" in self._edited:
             # Bot vừa sửa theo yêu cầu nhân viên: gateway đã ghi chú. Chỉ cập nhật
