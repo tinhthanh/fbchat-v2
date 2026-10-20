@@ -92,6 +92,12 @@ With `GATEWAY_URL` and `GATEWAY_TOKEN` (at least 32 characters) set, `multi_main
 - `POST /send` also takes `reply_to` (messageID of a customer message): the bot sends a quoted reply (`send_e2ee_message(..., reply_to_id, reply_to_sender_jid)` or `send_message(..., reply_to_id)`), the sender JID coming from the cache of the last 4096 messages. It returns `{"ok": true, "message_ids": [...]}`.
 - `POST /recall {account, thread_id, message_ids}`: `unsendE2EEMessage` / `unsendMessage` through `BridgeActions`; the `messageUnsend` event of that message is not noted twice.
 
+### Editing, customer state and messaging first
+
+- `POST /edit {account, thread_id, message_id, text}`: `editE2EEMessage`/`editMessage`; that message's own `messageEdit` event is not noted twice.
+- Customer typing/seen (`typing`, `readReceipt`, `e2eeReceipt` of type `read`, whatsmeow `ChatPresence` in `raw`) → `POST /v1/presence`; the account's own events are skipped and typing is sent at most every 3 seconds.
+- `POST /resolve {account, to}`: a numeric ID or profile link (`profile.php?id=…`, `facebook.com/<id>`) → `{thread_id: "e2ee:<id>@msgr", name, avatar}`.
+
 ### Account management (/accounts)
 
 The bot's HTTP server (same `GATEWAY_TOKEN` as `/send`) also serves routes for the Libredesk **Channel accounts** page; the gateway calls them, browsers never do:

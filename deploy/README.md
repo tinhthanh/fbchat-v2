@@ -92,6 +92,12 @@ Khi đặt `GATEWAY_URL` và `GATEWAY_TOKEN` (ít nhất 32 ký tự), `multi_ma
 - `POST /send` nhận thêm `reply_to` (messageID tin khách): bot gửi trả lời có trích dẫn (`send_e2ee_message(..., reply_to_id, reply_to_sender_jid)` hoặc `send_message(..., reply_to_id)`), JID người gửi lấy từ bộ nhớ 4096 tin gần nhất. Trả về `{"ok": true, "message_ids": [...]}`.
 - `POST /recall {account, thread_id, message_ids}`: `unsendE2EEMessage` / `unsendMessage` qua `BridgeActions`; sự kiện `messageUnsend` của chính tin đó không ghi chú lặp.
 
+### Sửa tin, trạng thái khách và nhắn trước
+
+- `POST /edit {account, thread_id, message_id, text}`: `editE2EEMessage`/`editMessage`; sự kiện `messageEdit` của chính tin đó không ghi chú lặp.
+- "Đang soạn"/"đã xem" của khách (`typing`, `readReceipt`, `e2eeReceipt` loại `read`, `ChatPresence` trong `raw` của whatsmeow) → `POST /v1/presence`; bỏ qua của chính tài khoản, "đang soạn" tối đa 3 giây/lần.
+- `POST /resolve {account, to}`: ID số hoặc link hồ sơ (`profile.php?id=…`, `facebook.com/<id>`) → `{thread_id: "e2ee:<id>@msgr", name, avatar}`.
+
 ### Quản lý tài khoản (/accounts)
 
 Server HTTP của bot (cùng `GATEWAY_TOKEN` với `/send`) có thêm các route cho trang **Channel accounts** của Libredesk; gateway gọi, trình duyệt không gọi trực tiếp:

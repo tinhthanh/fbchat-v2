@@ -600,13 +600,16 @@ async def test_account_bot_routes_meta_events_to_gateway(
         ) -> None:
             handled.append(event["type"])
 
+        async def post_presence(self, account: str, event: dict[str, Any]) -> None:
+            handled.append("presence:" + event["type"])
+
     monkeypatch.setattr(multi_main, "_gateway", _FakeGateway())
     bot = multi_main.AccountBot(mock_dataFB, account="acc1", device_path="/d.json")
     loop = asyncio.get_running_loop()
     bot._forward_listener_event(loop, {"type": "messageUnsend", "data": {}})
     bot._forward_listener_event(loop, {"type": "typing", "data": {}})
     await asyncio.sleep(0.05)
-    assert handled == ["messageUnsend"]
+    assert handled == ["messageUnsend", "presence:typing"]
 
 
 @pytest.mark.asyncio
@@ -902,6 +905,12 @@ async def test_send_returns_ids_and_recall_unsends_without_duplicate_note(
             unsent.append(("thread", message_id))
             return {}
 
+        async def edit_e2ee_message(
+            self, chat_jid: str, message_id: str, text: str
+        ) -> dict[str, Any]:
+            unsent.append(("edit", chat_jid, message_id, text))
+            return {}
+
     monkeypatch.setattr(gateway_link, "BridgeActions", _Actions)
     link = _link(handler)
     bot = _Bot()
@@ -962,3 +971,176 @@ def test_contact_names_from_lightspeed_tables() -> None:
     assert link.cached_profile("615") == ("Shop Hai", "https://cdn/s.jpg")
     assert link.cached_profile("42") == ("An", "")
     assert link.cached_profile("7") == ("", "")
+
+
+@pytest.mark.asyncio
+async def test_edit_agent_reply_without_duplicate_note(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+    edits: list[tuple[str, ...]] = []
+
+    class _Actions:
+        def __init__(self, bridge: Any) -> None:
+            pass
+
+        async def edit_e2ee_message(
+            self, chat_jid: str, message_id: str, text: str
+        ) -> dict[str, Any]:
+            edits.append((chat_jid, message_id, text))
+            return {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append((request.url.path, json.loads(request.content)))
+        return httpx.Response(200)
+
+    monkeypatch.setattr(gateway_link, "BridgeActions", _Actions)
+    link = _link(handler)
+    bot = _Bot()
+    bot.listener._bridge = _FakeBridge()  # type: ignore[attr-defined]
+    link.bots["acc1"] = bot  # type: ignore[assignment]
+    await link.send_reply(
+        {
+            "account": "acc1",
+            "thread_id": "e2ee:8@msgr",
+            "text": "giá 5tr",
+            "message_id": "r1",
+        }
+    )
+    edit = {
+        "account": "acc1",
+        "thread_id": "e2ee:8@msgr",
+        "message_id": "mid.out",
+        "text": "giá 4tr",
+    }
+    assert (await link.edit(edit))[0] == 200
+    assert edits == [("8@msgr", "mid.out", "giá 4tr")]
+    # Messenger báo lại sự kiện sửa của chính tin đó: không ghi chú lặp.
+    await link.handle_meta(
+        "acc1",
+        bot,  # type: ignore[arg-type]
+        {
+            "type": "messageEdit",
+            "data": {"messageId": "mid.out", "newText": "giá 4tr", "threadId": 0},
+        },
+    )
+    assert not [c for c in calls if c[0] == "/v1/event"]
+    assert (await link.edit({**edit, "text": " "}))[0] == 400
+
+
+def test_presence_of_facebook_events() -> None:
+    own = "100"
+    p = gateway_link.presence_of
+    assert p(
+        {
+            "type": "e2eeReceipt",
+            "data": {
+                "type": "read",
+                "chat": "42@msgr",
+                "sender": "42.0:1@msgr",
+                "messageIds": ["m1"],
+            },
+        },
+        own,
+    ) == ("e2ee:42@msgr", "read", ["m1"])
+    assert (
+        p(
+            {
+                "type": "e2eeReceipt",
+                "data": {"type": "delivered", "chat": "42@msgr", "sender": "42@msgr"},
+            },
+            own,
+        )
+        is None
+    )
+    assert (
+        p(
+            {
+                "type": "e2eeReceipt",
+                "data": {"type": "read", "chat": "42@msgr", "sender": "100.0:2@msgr"},
+            },
+            own,
+        )
+        is None
+    )
+    assert p({"type": "readReceipt", "data": {"threadId": 9, "readerId": 42}}, own) == (
+        "thread:9",
+        "read",
+        [],
+    )
+    assert (
+        p({"type": "readReceipt", "data": {"threadId": 9, "readerId": 100}}, own)
+        is None
+    )
+    assert p(
+        {"type": "typing", "data": {"threadId": 9, "senderId": 42, "isTyping": False}},
+        own,
+    ) == ("thread:9", "stopped", [])
+    raw = {
+        "type": "raw",
+        "data": {
+            "from": "whatsmeow",
+            "type": "ChatPresence",
+            "data": {
+                "Chat": "385@g.us",
+                "Sender": "42.0:3@msgr",
+                "IsFromMe": False,
+                "State": "composing",
+            },
+        },
+    }
+    assert p(raw, own) == ("e2ee:385@g.us", "typing", [])
+
+
+@pytest.mark.asyncio
+async def test_post_presence_throttles_typing() -> None:
+    calls: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(json.loads(request.content))
+        return httpx.Response(204)
+
+    link = _link(handler)
+    bot = _Bot()
+    link.bots["acc1"] = bot  # type: ignore[assignment]
+    typing = {
+        "type": "typing",
+        "data": {"threadId": 9, "senderId": 42, "isTyping": True},
+    }
+    await link.post_presence("acc1", typing)
+    await link.post_presence("acc1", typing)  # trong 3 giây: bỏ
+    await link.post_presence(
+        "acc1", {"type": "readReceipt", "data": {"threadId": 9, "readerId": 42}}
+    )
+    assert [(c["kind"], c["thread_id"]) for c in calls] == [
+        ("typing", "thread:9"),
+        ("read", "thread:9"),
+    ]
+
+
+def test_facebook_user_id_from_id_or_profile_link() -> None:
+    f = gateway_link.facebook_user_id
+    assert f("61568459183039") == "61568459183039"
+    assert (
+        f("https://www.facebook.com/profile.php?id=100024107767037&sk=about")
+        == "100024107767037"
+    )
+    assert f("facebook.com/100024107767037/") == "100024107767037"
+    assert f("https://facebook.com/some.name") == ""
+    assert f("123") == ""
+
+
+@pytest.mark.asyncio
+async def test_resolve_recipient(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(gateway_link._get_user_info, "func", _names)
+    link = _link(lambda r: httpx.Response(200))
+    link.bots["acc1"] = _Bot()  # type: ignore[assignment]
+    status, body = await link.resolve(
+        {"account": "acc1", "to": "profile.php?id=4242424"}
+    )
+    assert status == 200 and json.loads(body) == {
+        "thread_id": "e2ee:4242424@msgr",
+        "name": "User 4242424",
+        "avatar": "",
+    }
+    assert (await link.resolve({"account": "acc1", "to": "some.name"}))[0] == 400

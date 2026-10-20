@@ -39,7 +39,12 @@ from _core._storage import FileSessionStorage
 from _messaging._listening_e2ee import _format_exception_chain
 from main import DEFAULT_HTTP_TIMEOUT, SimpleBot, is_valid_datafb
 
-from gateway_link import META_EVENT_TYPES, GatewayLink, undecryptable_message
+from gateway_link import (
+    META_EVENT_TYPES,
+    PRESENCE_EVENT_TYPES,
+    GatewayLink,
+    undecryptable_message,
+)
 
 ACCOUNTS_DIR = Path(
     os.environ.get("FBCHAT_ACCOUNTS_DIR", Path(__file__).resolve().parent / "accounts")
@@ -168,6 +173,11 @@ class AccountBot(SimpleBot):
             changes = _gateway.observe_raw(self.account, event)
             lost = undecryptable_message(event)
             try:
+                # Khách đang soạn tin trong chat E2EE (whatsmeow ChatPresence).
+                if (event.get("data") or {}).get("type") == "ChatPresence":
+                    asyncio.run_coroutine_threadsafe(
+                        _gateway.post_presence(self.account, event), loop
+                    )
                 if changes:
                     asyncio.run_coroutine_threadsafe(
                         _gateway.post_group_changes(self.account, self, changes), loop
@@ -178,6 +188,18 @@ class AccountBot(SimpleBot):
                     )
             except RuntimeError:
                 pass  # loop đã đóng khi đang tắt
+        if (
+            _gateway is not None
+            and isinstance(event, dict)
+            and event.get("type") in PRESENCE_EVENT_TYPES
+        ):
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    _gateway.post_presence(self.account, event), loop
+                )
+            except RuntimeError:
+                pass  # loop đã đóng khi đang tắt
+            return
         if (
             _gateway is not None
             and isinstance(event, dict)

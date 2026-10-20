@@ -18,6 +18,7 @@ import binascii
 import hmac
 import json
 import os
+import re
 import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
@@ -139,6 +140,59 @@ def undecryptable_message(event: dict[str, Any]) -> dict[str, Any] | None:
         "type": "e2ee",
         "attachments": [],
     }
+
+
+PRESENCE_EVENT_TYPES = frozenset({"typing", "e2eeReceipt", "readReceipt"})
+TYPING_THROTTLE_SECONDS = 3.0
+
+
+def presence_of(
+    event: dict[str, Any], own_id: str
+) -> tuple[str, str, list[str]] | None:
+    """(thread_id, typing|stopped|read, message_ids) cho "đã xem"/"đang soạn tin"
+    của khách; None nếu không phải hoặc do chính tài khoản."""
+    kind = event.get("type")
+    data = event.get("data")
+    if not isinstance(data, dict):
+        return None
+    if kind == "e2eeReceipt":
+        chat = str(data.get("chat") or "")
+        if data.get("type") != "read" or "@" not in chat:
+            return None
+        if _jid_user(data.get("sender")) == own_id:
+            return None
+        ids = [str(i) for i in (data.get("messageIds") or []) if i]
+        return f"e2ee:{chat}", "read", ids
+    if kind == "readReceipt":
+        if not data.get("threadId") or str(data.get("readerId") or "") == own_id:
+            return None
+        return f"thread:{data['threadId']}", "read", []
+    if kind == "typing":
+        if not data.get("threadId") or str(data.get("senderId") or "") == own_id:
+            return None
+        state = "typing" if data.get("isTyping") else "stopped"
+        return f"thread:{data['threadId']}", state, []
+    if kind == "raw" and data.get("type") == "ChatPresence":
+        info = data.get("data")
+        if not isinstance(info, dict) or info.get("IsFromMe"):
+            return None
+        chat = str(info.get("Chat") or "")
+        if "@" not in chat or _jid_user(info.get("Sender")) == own_id:
+            return None
+        state = "typing" if info.get("State") == "composing" else "stopped"
+        return f"e2ee:{chat}", state, []
+    return None
+
+
+def facebook_user_id(raw: Any) -> str:
+    """ID số Facebook từ ID hoặc link hồ sơ (profile.php?id=..., facebook.com/123...)."""
+    text = str(raw or "").strip()
+    if text.isdigit() and len(text) >= 5:
+        return text
+    match = re.search(r"[?&]id=(\d{5,})", text) or re.search(
+        r"facebook\.com/(\d{5,})(?:[/?#]|$)", text
+    )
+    return match.group(1) if match else ""
 
 
 def thread_ref(message: dict[str, Any]) -> tuple[str, bool] | None:
@@ -326,6 +380,10 @@ class GatewayLink:
         self._members: OrderedDict[str, dict[str, bool]] = OrderedDict()
         # "tài khoản:messageId" các tin bot thu hồi theo yêu cầu nhân viên: gateway đã ghi chú.
         self._recalled: OrderedDict[str, None] = OrderedDict()
+        # "tài khoản:messageId" các tin bot sửa theo yêu cầu nhân viên.
+        self._edited: OrderedDict[str, None] = OrderedDict()
+        # "tài khoản:thread_id" -> lúc gửi "đang soạn" gần nhất (chặn gửi dồn).
+        self._last_typing: dict[str, float] = {}
         # Route thêm trên cùng server HTTP (multi_main: /accounts), cùng token.
         self.routes: (
             Callable[[str, str, bytes], Awaitable[tuple[int, Any] | None]] | None
@@ -709,6 +767,11 @@ class GatewayLink:
                 f"{emoji}{target}",
                 f"{message_id}-{actor}-{emoji}",
             )
+        elif kind == "messageEdit" and f"{account}:{message_id}" in self._edited:
+            # Bot vừa sửa theo yêu cầu nhân viên: gateway đã ghi chú. Chỉ cập nhật
+            # nội dung đã nhớ (cho trích dẫn/thu hồi sau này).
+            cached["summary"] = str(data.get("newText") or "")
+            return
         elif kind == "messageEdit":
             if not cached.get("thread_id"):
                 return  # sửa tin không rõ thread (bot chưa thấy tin gốc)
@@ -920,6 +983,88 @@ class GatewayLink:
         # Gateway giữ các id này để nhân viên thu hồi tin sau.
         return 200, json.dumps({"ok": True, "message_ids": [i for i in sent_ids if i]})
 
+    async def post_presence(self, account: str, event: dict[str, Any]) -> None:
+        """Chuyển "đã xem"/"đang soạn tin" của khách cho gateway (bỏ qua lỗi)."""
+        bot = self.bots.get(account)
+        own_id = str(bot.dataFB.get("FacebookID") or "") if bot is not None else ""
+        found = presence_of(event, own_id)
+        if found is None:
+            return
+        thread_id, kind, ids = found
+        now = asyncio.get_running_loop().time()
+        key = f"{account}:{thread_id}"
+        if kind == "typing":
+            if now - self._last_typing.get(key, -1e9) < TYPING_THROTTLE_SECONDS:
+                return
+            self._last_typing[key] = now
+            if len(self._last_typing) > RECENT_MAX:
+                self._last_typing.pop(next(iter(self._last_typing)))
+        else:
+            self._last_typing.pop(key, None)
+        try:
+            await self._post(
+                "/v1/presence",
+                {
+                    "channel": CHANNEL,
+                    "account": account,
+                    "thread_id": thread_id,
+                    "kind": kind,
+                    "message_ids": ids,
+                },
+            )
+        except httpx.HTTPError:
+            pass  # trạng thái phụ: mất một lần không sao
+
+    async def resolve(self, payload: dict[str, Any]) -> tuple[int, str]:
+        """Người nhận cho tin nhân viên nhắn trước: ID Facebook -> chat E2EE."""
+        bot = self.bots.get(str(payload.get("account") or ""))
+        if bot is None:
+            return 404, "unknown account"
+        user_id = facebook_user_id(payload.get("to"))
+        if not user_id:
+            return 400, "Nhập ID số Facebook của khách (hoặc link hồ sơ có id=...)."
+        name, avatar = await self._user_profile(bot, user_id)
+        return 200, json.dumps(
+            {"thread_id": f"e2ee:{user_id}@msgr", "name": name, "avatar": avatar}
+        )
+
+    async def edit(self, payload: dict[str, Any]) -> tuple[int, str]:
+        """Sửa tin nhân viên đã gửi (gateway gọi POST /edit)."""
+        account = str(payload.get("account") or "")
+        bot = self.bots.get(account)
+        if bot is None:
+            return 404, "unknown account"
+        thread_id = str(payload.get("thread_id") or "")
+        kind, _, target = thread_id.partition(":")
+        message_id = str(payload.get("message_id") or "")
+        text = payload.get("text")
+        if not message_id or not isinstance(text, str) or not text.strip():
+            return 400, "invalid payload"
+        if kind not in ("e2ee", "thread") or not target:
+            return 400, "invalid payload"
+        bridge = _bridge_of(bot)
+        if bridge is None:
+            return 502, "bridge not ready"
+        actions = BridgeActions(bridge)  # type: ignore[arg-type]
+        key = f"{account}:{message_id}"
+        self._edited[key] = None
+        while len(self._edited) > RECENT_MAX:
+            self._edited.popitem(last=False)
+        try:
+            if kind == "e2ee":
+                await actions.edit_e2ee_message(target, message_id, text)
+            else:
+                await actions.edit_message(message_id, text)
+        except Exception as error:  # bridge/Facebook từ chối (vd. quá hạn sửa)
+            self._edited.pop(key, None)
+            self.log("gateway", f"❌ Sửa tin thất bại: {error}")
+            return 502, f"Facebook không sửa được tin: {error}"
+        cached = self._recent.get(key)
+        if cached is not None:
+            cached["summary"] = text[:200]
+        self.log("gateway", "Đã sửa tin nhân viên.")
+        return 200, json.dumps({"ok": True})
+
     async def recall(self, payload: dict[str, Any]) -> tuple[int, str]:
         """Thu hồi tin nhân viên đã gửi (gateway gọi POST /recall)."""
         account = str(payload.get("account") or "")
@@ -986,7 +1131,12 @@ class GatewayLink:
                 headers[name.strip().lower()] = value.strip()
             method, path, *_ = request_line.decode("latin-1").split()
             length = int(headers.get("content-length") or 0)
-            is_send = method == "POST" and path in ("/send", "/recall")
+            is_send = method == "POST" and path in (
+                "/send",
+                "/recall",
+                "/edit",
+                "/resolve",
+            )
             if not is_send and self.routes is None:
                 status, text = 404, "not found"
             elif not hmac.compare_digest(
@@ -1011,8 +1161,17 @@ class GatewayLink:
                 except ValueError:
                     status, text = 400, "invalid json"
                 else:
-                    if isinstance(payload, dict) and path == "/recall":
-                        status, text = await self.recall(payload)
+                    if isinstance(payload, dict) and path in (
+                        "/recall",
+                        "/edit",
+                        "/resolve",
+                    ):
+                        handler = {
+                            "/recall": self.recall,
+                            "/edit": self.edit,
+                            "/resolve": self.resolve,
+                        }[path]
+                        status, text = await handler(payload)
                         content_type = (
                             "application/json" if status == 200 else content_type
                         )
