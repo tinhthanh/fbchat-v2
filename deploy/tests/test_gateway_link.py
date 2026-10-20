@@ -940,3 +940,25 @@ async def test_send_returns_ids_and_recall_unsends_without_duplicate_note(
             {"account": "nope", "thread_id": "e2ee:8@msgr", "message_ids": ["x"]}
         )
     )[0] == 404
+
+
+def test_contact_names_from_lightspeed_tables() -> None:
+    link, _ = _recording_link()
+    link.observe_raw(
+        "acc",
+        _ls(
+            {
+                "LSDeleteThenInsertContact": [
+                    {
+                        "Id": 615,
+                        "Name": "Shop Hai",
+                        "ProfilePictureUrl": "https://cdn/s.jpg",
+                    }
+                ],
+                "LSVerifyContactRowExists": [{"ContactId": 42, "Name": " An "}],
+            }
+        ),
+    )
+    assert link.cached_profile("615") == ("Shop Hai", "https://cdn/s.jpg")
+    assert link.cached_profile("42") == ("An", "")
+    assert link.cached_profile("7") == ("", "")

@@ -103,6 +103,8 @@ Server HTTP của bot (cùng `GATEWAY_TOKEN` với `/send`) có thêm các route
 | `POST /accounts/<tên>/restart` | Kết nối lại (cũng dùng sau khi đăng nhập bằng trình duyệt) |
 | `DELETE /accounts/<tên>` | Dừng và xoá thư mục tài khoản |
 
+Tên/ảnh của chính tài khoản lấy từ `/chat/user_info`; một số tài khoản không tra được chính mình, khi đó lấy từ bảng danh bạ LightSpeed (`LSDeleteThenInsertContact`, `LSVerifyContactRowExists`) bridge gửi lúc kết nối. Bảng này cũng điền tên cho khách có trong danh bạ.
+
 `AccountManager` (trong `multi_main.py`) chạy mỗi tài khoản trong một task; dừng hoặc kết nối lại là huỷ task, `SimpleBot.run()` tự dừng bridge. Khi bật gateway, bot vẫn khởi động khi chưa có tài khoản nào.
 
 Đăng nhập bằng trình duyệt dùng dịch vụ `fb-login-ui` (image `login/`, lệnh `control.py`): rảnh chỉ có server điều khiển (~20 MiB); `POST /session {"account"}` chạy `extract_cookie.py` với `FORCE_LOGIN=1` (Chromium + noVNC cổng 6080), `GET /session` trả `starting` tới khi noVNC sẵn sàng rồi `running`, `saving` khi `extract_cookie.py` đã thấy đăng nhập và đóng Chromium để ghi cookie, `success` khi đã ghi cookie, `DELETE /session` huỷ. Mỗi lúc một phiên; hồ sơ Chromium bị xoá trước và sau mỗi phiên để tài khoản sau không nhận nhầm cookie. Server điều khiển cần `GATEWAY_TOKEN` và không log URL/header.

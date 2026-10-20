@@ -398,6 +398,15 @@ class AccountManager:
 
     def list(self) -> list[dict[str, Any]]:
         names = {n for n, _ in discover_accounts(self.root)} | set(_account_states)
+        # Tên/ảnh chưa tra được lúc khởi động: lấy từ danh bạ LightSpeed đã thấy.
+        for profile in _account_profiles.values():
+            if (
+                _gateway is not None
+                and profile.get("uid")
+                and not profile.get("displayName")
+            ):
+                name, avatar = _gateway.cached_profile(profile["uid"])
+                profile.update(displayName=name, avatar=profile.get("avatar") or avatar)
         return [
             {
                 "name": n,

@@ -398,6 +398,16 @@ class GatewayLink:
             self._remember_thread(account, key, name, None)
             if known and isinstance(name, str) and name.strip() not in ("", known):
                 changes.append((key, "rename", name.strip()))
+        # Danh bạ (kể cả chính tài khoản): tên/ảnh dùng khi /chat/user_info
+        # không trả hồ sơ (một số tài khoản không tra được chính mình).
+        for name, id_key in (
+            ("LSDeleteThenInsertContact", "Id"),
+            ("LSVerifyContactRowExists", "ContactId"),
+        ):
+            for row in _rows(table, name):
+                self._remember_contact(
+                    row.get(id_key), row.get("Name"), row.get("ProfilePictureUrl")
+                )
         for row in _rows(table, "LSSetThreadImageURL"):
             self._remember_thread(
                 account, row.get("ThreadKey"), None, row.get("ImageURL")
@@ -439,6 +449,29 @@ class GatewayLink:
                 members.pop(contact, None)
             changes.append((key, "remove", contact))
         return [c for c in changes if c[0]]
+
+    def _remember_contact(self, user_id: Any, name: Any, picture: Any) -> None:
+        if not user_id or not isinstance(name, str) or not name.strip():
+            return
+        key = str(user_id)
+        cached = self._names.get(key)
+        avatar = (
+            picture
+            if isinstance(picture, str) and picture.startswith("https://")
+            else ""
+        )
+        if cached and cached[0] == name.strip() and (cached[1] or not avatar):
+            return
+        try:
+            now = asyncio.get_running_loop().time()
+        except RuntimeError:  # listener thread: không có event loop
+            now = cached[2] if cached else 0.0
+        self._names[key] = (name.strip(), avatar or (cached[1] if cached else ""), now)
+
+    def cached_profile(self, user_id: str) -> tuple[str, str]:
+        """(tên, ảnh) đã biết của user, không gọi mạng."""
+        cached = self._names.get(str(user_id))
+        return (cached[0], cached[1]) if cached else ("", "")
 
     def _thread_members(self, account: str, key: str) -> dict[str, bool] | None:
         return self._members.get(f"{account}:{key}")

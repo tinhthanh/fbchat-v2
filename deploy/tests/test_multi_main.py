@@ -386,3 +386,26 @@ async def test_expired_session_stops_after_two_attempts(
     )
     assert ok is False and calls["n"] == multi_main.SESSION_EXPIRED_ATTEMPTS
     assert multi_main._account_states["expired"] == "dropped"
+
+
+def test_account_list_fills_name_from_contacts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class _Gateway:
+        def cached_profile(self, uid: str) -> tuple[str, str]:
+            return ("Shop Hai", "https://cdn/s.jpg") if uid == "615" else ("", "")
+
+    monkeypatch.setattr(multi_main, "_gateway", _Gateway())
+    monkeypatch.setattr(multi_main, "_account_states", {"shop2": "running"})
+    monkeypatch.setattr(
+        multi_main,
+        "_account_profiles",
+        {"shop2": {"uid": "615", "displayName": "", "avatar": ""}},
+    )
+    manager = multi_main.AccountManager(tmp_path, object())  # type: ignore[arg-type]
+    profile = manager.list()[0]["profile"]
+    assert profile == {
+        "uid": "615",
+        "displayName": "Shop Hai",
+        "avatar": "https://cdn/s.jpg",
+    }
