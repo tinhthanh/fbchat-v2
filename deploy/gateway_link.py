@@ -18,6 +18,7 @@ import binascii
 import hmac
 import json
 import os
+import time
 from collections import OrderedDict
 from collections.abc import Callable
 from typing import Any, Protocol
@@ -280,6 +281,9 @@ class GatewayLink:
         # "tài khoản:threadKey" -> {"name", "picture"}: tên/ảnh nhóm đọc từ bảng
         # LightSpeed trong sự kiện raw (tin E2EE không mang tên nhóm).
         self._threads: OrderedDict[str, dict[str, str]] = OrderedDict()
+        # "tài khoản:threadKey" -> {contactId: isAdmin}: thành viên nhóm đã thấy, để
+        # chỉ báo thay đổi thật chứ không báo cả danh sách mỗi lần đồng bộ.
+        self._members: OrderedDict[str, dict[str, bool]] = OrderedDict()
 
     @classmethod
     def from_env(
@@ -316,15 +320,25 @@ class GatewayLink:
         if self.bots.get(account) is bot:
             del self.bots[account]
 
-    def observe_raw(self, account: str, event: dict[str, Any]) -> None:
-        """Nhớ tên và ảnh nhóm từ bảng LightSpeed (gọi từ listener thread)."""
+    def observe_raw(
+        self, account: str, event: dict[str, Any]
+    ) -> list[tuple[str, str, str]]:
+        """Nhớ tên/ảnh/thành viên nhóm từ bảng LightSpeed (gọi từ listener thread).
+
+        Trả về các thay đổi nhóm ``(threadKey, loại, giá trị)`` để ghi chú. Bảng
+        LightSpeed vừa là sự kiện vừa là dữ liệu đồng bộ lúc kết nối, nên chỉ báo
+        khi khác trạng thái đã biết: thà bỏ sót còn hơn báo sai cả loạt.
+        """
         data = event.get("data")
         if not isinstance(data, dict) or data.get("type") != "LSTable":
-            return
+            return []
         table = data.get("data")
         if not isinstance(table, dict):
-            return
+            return []
+        changes: list[tuple[str, str, str]] = []
+        snapshots = set()
         for row in _rows(table, "LSDeleteThenInsertThread"):
+            snapshots.add(str(row.get("ThreadKey") or ""))
             self._remember_thread(
                 account,
                 row.get("ThreadKey"),
@@ -332,13 +346,96 @@ class GatewayLink:
                 row.get("ThreadPictureUrl"),
             )
         for row in _rows(table, "LSSyncUpdateThreadName"):
-            self._remember_thread(
-                account, row.get("ThreadKey"), row.get("ThreadName"), None
-            )
+            key = str(row.get("ThreadKey") or "")
+            name = row.get("ThreadName")
+            known = self._threads.get(f"{account}:{key}", {}).get("name")
+            self._remember_thread(account, key, name, None)
+            if known and isinstance(name, str) and name.strip() not in ("", known):
+                changes.append((key, "rename", name.strip()))
         for row in _rows(table, "LSSetThreadImageURL"):
             self._remember_thread(
                 account, row.get("ThreadKey"), None, row.get("ImageURL")
             )
+        added: dict[str, list[dict[str, Any]]] = {}
+        for row in _rows(table, "LSAddParticipantIdToGroupThread"):
+            added.setdefault(str(row.get("ThreadKey") or ""), []).append(row)
+        for key, rows in added.items():
+            members = self._thread_members(account, key)
+            # Ảnh chụp cả hội thoại hoặc lần đầu thấy nhóm: chỉ ghi nhận.
+            report = members is not None and key not in snapshots and len(rows) <= 3
+            members = members if members is not None else {}
+            for row in rows:
+                contact = str(row.get("ContactId") or "")
+                if not contact:
+                    continue
+                if report and contact not in members:
+                    changes.append((key, "add", contact))
+                members[contact] = bool(row.get("IsAdmin"))
+            self._set_thread_members(account, key, members)
+        for row in _rows(table, "LSUpdateThreadParticipantAdminStatus"):
+            key, contact = str(row.get("ThreadKey") or ""), str(
+                row.get("ContactId") or ""
+            )
+            members = self._thread_members(account, key)
+            if members is None or contact not in members:
+                continue
+            is_admin = bool(row.get("IsAdmin"))
+            if members[contact] != is_admin:
+                changes.append((key, "admin" if is_admin else "unadmin", contact))
+            members[contact] = is_admin
+        for row in _rows(table, "LSRemoveParticipantFromThread"):
+            key = str(row.get("ThreadKey") or "")
+            contact = str(row.get("ParticipantId") or "")
+            if not key or not contact:
+                continue
+            members = self._thread_members(account, key)
+            if members is not None:
+                members.pop(contact, None)
+            changes.append((key, "remove", contact))
+        return [c for c in changes if c[0]]
+
+    def _thread_members(self, account: str, key: str) -> dict[str, bool] | None:
+        return self._members.get(f"{account}:{key}")
+
+    def _set_thread_members(
+        self, account: str, key: str, members: dict[str, bool]
+    ) -> None:
+        cache_key = f"{account}:{key}"
+        self._members[cache_key] = members
+        self._members.move_to_end(cache_key)
+        while len(self._members) > RECENT_MAX:
+            self._members.popitem(last=False)
+
+    async def post_group_changes(
+        self, account: str, bot: _Bot, changes: list[tuple[str, str, str]]
+    ) -> None:
+        """Thay đổi nhóm Facebook thành ghi chú ``group_event``.
+
+        Không biết nhóm là E2EE hay chat thường, nên gửi cho cả hai thread id:
+        gateway bỏ qua (202) thread chưa có hội thoại.
+        """
+        for key, change, value in changes:
+            if change == "rename":
+                text = f"Nhóm đổi tên thành «{value}»"
+            else:
+                name = await self._user_name(bot, value) or f"Facebook {value}"
+                text = {
+                    "add": f"{name} đã vào nhóm",
+                    "remove": f"{name} đã rời hoặc bị xoá khỏi nhóm",
+                    "admin": f"{name} được làm quản trị viên",
+                    "unadmin": f"{name} không còn là quản trị viên",
+                }[change]
+            minute = int(time.time() // 60)
+            for thread_id in (f"e2ee:{key}@g.us", f"thread:{key}"):
+                await self._post_event(
+                    account,
+                    thread_id,
+                    True,
+                    "group_event",
+                    "",
+                    text,
+                    f"{change}-{key}-{value}-{minute}",
+                )
 
     def _remember_thread(self, account: str, key: Any, name: Any, picture: Any) -> None:
         if not key:

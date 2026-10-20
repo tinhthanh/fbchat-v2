@@ -138,8 +138,15 @@ class AccountBot(SimpleBot):
             and isinstance(event, dict)
             and event.get("type") == "raw"
         ):
-            # Bảng LightSpeed mang tên/ảnh nhóm (tin E2EE thì không).
-            _gateway.observe_raw(self.account, event)
+            # Bảng LightSpeed mang tên/ảnh/thành viên nhóm (tin E2EE thì không).
+            changes = _gateway.observe_raw(self.account, event)
+            if changes:
+                try:
+                    asyncio.run_coroutine_threadsafe(
+                        _gateway.post_group_changes(self.account, self, changes), loop
+                    )
+                except RuntimeError:
+                    pass  # loop đã đóng khi đang tắt
         if (
             _gateway is not None
             and isinstance(event, dict)

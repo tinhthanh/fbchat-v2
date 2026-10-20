@@ -753,3 +753,66 @@ async def test_unsupported_e2ee_content_becomes_placeholder(
     # Tin thường rỗng (sự kiện hệ thống) vẫn bỏ qua.
     await link.forward("shop", _Bot(), {**empty, "messageID": "m2", "type": "thread"})
     assert [c[1]["text"] for c in calls] == [gateway_link.UNSUPPORTED_E2EE_TEXT]
+
+
+def _ls(table: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "type": "raw",
+        "data": {"from": "lightspeed", "type": "LSTable", "data": table},
+    }
+
+
+@pytest.mark.asyncio
+async def test_group_changes_only_from_known_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(gateway_link._get_user_info, "func", _names)
+    link, calls = _recording_link()
+    member = "LSAddParticipantIdToGroupThread"
+    # Đồng bộ lúc kết nối: ảnh chụp hội thoại + cả danh sách thành viên.
+    sync = {
+        "LSDeleteThenInsertThread": [{"ThreadKey": 38, "ThreadName": "Nhóm A"}],
+        member: [{"ThreadKey": 38, "ContactId": c} for c in (1, 2, 3, 4)],
+    }
+    assert link.observe_raw("acc", _ls(sync)) == []
+    assert link.observe_raw("acc", _ls(sync)) == []
+    # Cùng tên khi đồng bộ lại: không phải đổi tên.
+    same = {"LSSyncUpdateThreadName": [{"ThreadKey": 38, "ThreadName": "Nhóm A"}]}
+    assert link.observe_raw("acc", _ls(same)) == []
+    changes = link.observe_raw(
+        "acc",
+        _ls(
+            {
+                "LSSyncUpdateThreadName": [{"ThreadKey": 38, "ThreadName": "Nhóm B"}],
+                member: [{"ThreadKey": 38, "ContactId": 9}],
+                "LSUpdateThreadParticipantAdminStatus": [
+                    {"ThreadKey": 38, "ContactId": 2, "IsAdmin": True},
+                    {"ThreadKey": 38, "ContactId": 77, "IsAdmin": True},
+                ],
+                "LSRemoveParticipantFromThread": [
+                    {"ThreadKey": 38, "ParticipantId": 3}
+                ],
+            }
+        ),
+    )
+    assert changes == [
+        ("38", "rename", "Nhóm B"),
+        ("38", "add", "9"),
+        ("38", "admin", "2"),
+        ("38", "remove", "3"),
+    ]
+    # Nhóm chưa từng thấy: thành viên đầu tiên chỉ được ghi nhận.
+    assert (
+        link.observe_raw("acc", _ls({member: [{"ThreadKey": 50, "ContactId": 1}]}))
+        == []
+    )
+
+    await link.post_group_changes("acc", _Bot(), changes[:2])
+    texts = [(c[1]["thread_id"], c[1]["text"]) for c in calls]
+    assert texts == [
+        ("e2ee:38@g.us", "Nhóm đổi tên thành «Nhóm B»"),
+        ("thread:38", "Nhóm đổi tên thành «Nhóm B»"),
+        ("e2ee:38@g.us", "User 9 đã vào nhóm"),
+        ("thread:38", "User 9 đã vào nhóm"),
+    ]
+    assert all(c[1]["kind"] == "group_event" and c[1]["is_group"] for c in calls)
