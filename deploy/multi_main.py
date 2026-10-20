@@ -352,7 +352,7 @@ async def supervise_account(
             log(
                 "multi",
                 f"❌ {_format_exception_chain(error)}; thử lại sau {delay:.0f}s "
-                f"({attempt}/{max_attempts}).",
+                f"({attempt}/{limit}).",
             )
             await asyncio.sleep(delay)
 
