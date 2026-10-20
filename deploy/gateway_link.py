@@ -92,11 +92,17 @@ def _raw(message: dict[str, Any]) -> dict[str, Any]:
     return raw if isinstance(raw, dict) else {}
 
 
+def _rows(table: dict[str, Any], name: str) -> list[dict[str, Any]]:
+    rows = table.get(name)
+    return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+
+
 def thread_ref(message: dict[str, Any]) -> tuple[str, bool] | None:
     """Trả về (thread_id cho gateway, is_group) hoặc None nếu thiếu thông tin."""
     chat_jid = message.get("chatJid")
     if chat_jid:
-        return f"e2ee:{chat_jid}", False
+        # Nhóm E2EE có JID dạng <id>@g.us; chat 1-1 là <id>@msgr.
+        return f"e2ee:{chat_jid}", str(chat_jid).endswith("@g.us")
     raw = _raw(message)
     thread_id = raw.get("threadId") or message.get("replyToID")
     if not thread_id:
@@ -268,6 +274,9 @@ class GatewayLink:
         self._recent: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self._bot_sent: OrderedDict[str, None] = OrderedDict()
         self._pending: list[dict[str, Any]] = []
+        # "tài khoản:threadKey" -> {"name", "picture"}: tên/ảnh nhóm đọc từ bảng
+        # LightSpeed trong sự kiện raw (tin E2EE không mang tên nhóm).
+        self._threads: OrderedDict[str, dict[str, str]] = OrderedDict()
 
     @classmethod
     def from_env(
@@ -303,6 +312,53 @@ class GatewayLink:
     def unregister(self, account: str, bot: _Bot) -> None:
         if self.bots.get(account) is bot:
             del self.bots[account]
+
+    def observe_raw(self, account: str, event: dict[str, Any]) -> None:
+        """Nhớ tên và ảnh nhóm từ bảng LightSpeed (gọi từ listener thread)."""
+        data = event.get("data")
+        if not isinstance(data, dict) or data.get("type") != "LSTable":
+            return
+        table = data.get("data")
+        if not isinstance(table, dict):
+            return
+        for row in _rows(table, "LSDeleteThenInsertThread"):
+            self._remember_thread(
+                account,
+                row.get("ThreadKey"),
+                row.get("ThreadName"),
+                row.get("ThreadPictureUrl"),
+            )
+        for row in _rows(table, "LSSyncUpdateThreadName"):
+            self._remember_thread(
+                account, row.get("ThreadKey"), row.get("ThreadName"), None
+            )
+        for row in _rows(table, "LSSetThreadImageURL"):
+            self._remember_thread(
+                account, row.get("ThreadKey"), None, row.get("ImageURL")
+            )
+
+    def _remember_thread(self, account: str, key: Any, name: Any, picture: Any) -> None:
+        if not key:
+            return
+        cache_key = f"{account}:{key}"
+        entry = dict(self._threads.get(cache_key) or {})
+        if isinstance(name, str) and name.strip():
+            if "name" not in entry:
+                self.log("gateway", f"Đã biết tên nhóm {key} (từ bảng LightSpeed).")
+            entry["name"] = name.strip()
+        if isinstance(picture, str) and picture.startswith("https://"):
+            entry["picture"] = picture
+        if not entry:
+            return
+        self._threads[cache_key] = entry
+        self._threads.move_to_end(cache_key)
+        while len(self._threads) > RECENT_MAX:
+            self._threads.popitem(last=False)
+
+    def group_info(self, account: str, thread_id: str) -> dict[str, str]:
+        """Tên/ảnh nhóm đã biết cho thread id của gateway (e2ee:<id>@g.us hoặc thread:<id>)."""
+        key = thread_id.split(":", 1)[-1].split("@", 1)[0]
+        return self._threads.get(f"{account}:{key}") or {}
 
     async def _user_profile(self, bot: _Bot, user_id: str) -> tuple[str, str]:
         """Tên và ảnh đại diện Facebook của user; tra lại sau 1 giờ nếu lần trước
@@ -552,7 +608,11 @@ class GatewayLink:
             },
         )
         raw = _raw(message)
-        thread_name = raw.get("threadName") or ("" if is_group else sender_name)
+        group = self.group_info(account, thread_id) if is_group else {}
+        # Nhóm chưa biết tên: để trống, gateway đặt tên chung (không lấy tên người gửi).
+        thread_name = raw.get("threadName") or (
+            group.get("name", "") if is_group else sender_name
+        )
         try:
             await self._post(
                 "/v1/inbound",
@@ -568,7 +628,7 @@ class GatewayLink:
                     "attachments": files,
                     "quote": self._quote(account, message),
                     # Nhóm Facebook: chưa có API ảnh nhóm, Libredesk dùng chữ viết tắt.
-                    "thread_avatar": "" if is_group else avatar,
+                    "thread_avatar": group.get("picture", "") if is_group else avatar,
                     "sender_avatar": avatar,
                 },
             )

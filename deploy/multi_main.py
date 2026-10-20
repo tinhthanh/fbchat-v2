@@ -136,6 +136,13 @@ class AccountBot(SimpleBot):
         if (
             _gateway is not None
             and isinstance(event, dict)
+            and event.get("type") == "raw"
+        ):
+            # Bảng LightSpeed mang tên/ảnh nhóm (tin E2EE thì không).
+            _gateway.observe_raw(self.account, event)
+        if (
+            _gateway is not None
+            and isinstance(event, dict)
             and event.get("type") in META_EVENT_TYPES
         ):
             try:

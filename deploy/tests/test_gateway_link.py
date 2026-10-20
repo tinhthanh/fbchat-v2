@@ -79,6 +79,7 @@ def _link(handler: Any) -> GatewayLink:
 
 def test_thread_ref_distinguishes_e2ee_one_to_one_and_group() -> None:
     assert thread_ref({"chatJid": "123@msgr"}) == ("e2ee:123@msgr", False)
+    assert thread_ref({"chatJid": "3858@g.us"}) == ("e2ee:3858@g.us", True)
     assert thread_ref({"raw": {"threadId": 55, "threadType": 1}}) == (
         "thread:55",
         False,
@@ -657,3 +658,82 @@ async def test_unknown_name_falls_back_to_readable_label(
         calls[0][1]["thread_name"] == "Facebook 42"
         and calls[0][1]["sender_name"] == "Facebook 42"
     )
+
+
+@pytest.mark.asyncio
+async def test_e2ee_group_name_and_picture_from_raw_tables(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(json.loads(request.content))
+        return httpx.Response(200, json={})
+
+    async def fake_user_info(
+        dataFB: dict[str, Any], user_id: str, **_: Any
+    ) -> dict[str, Any]:
+        return {"nameUser": "Đoàn Duy Nhất", "thumbSrc": "https://cdn/u.jpg"}
+
+    monkeypatch.setattr(gateway_link._get_user_info, "func", fake_user_info)
+    link = _link(handler)
+    message = {"messageID": "m1", "userID": "7", "body": "chào", "chatJid": "3858@g.us"}
+    # Chưa biết tên nhóm: không lấy tên người gửi làm tên hội thoại.
+    await link.forward("acc1", _Bot(), message)
+    assert sent[0]["is_group"] is True and sent[0]["thread_name"] == ""
+    assert sent[0]["sender_name"] == "Đoàn Duy Nhất"
+
+    def raw(table: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "type": "raw",
+            "data": {"from": "lightspeed", "type": "LSTable", "data": table},
+        }
+
+    link.observe_raw(
+        "acc1",
+        raw(
+            {
+                "LSDeleteThenInsertThread": [
+                    {
+                        "ThreadKey": 3858,
+                        "ThreadName": "Nhóm VetGo",
+                        "ThreadPictureUrl": "https://cdn/g.jpg",
+                    }
+                ]
+            }
+        ),
+    )
+    link.observe_raw(
+        "acc2",
+        raw({"LSSyncUpdateThreadName": [{"ThreadKey": 3858, "ThreadName": "Khác"}]}),
+    )
+    link.observe_raw(
+        "acc1", {"type": "raw", "data": {"type": "ReadyEvent", "data": None}}
+    )
+    await link.forward("acc1", _Bot(), {**message, "messageID": "m2"})
+    assert sent[1]["thread_name"] == "Nhóm VetGo"
+    assert sent[1]["thread_avatar"] == "https://cdn/g.jpg"
+    assert sent[1]["sender_avatar"] == "https://cdn/u.jpg"
+
+    # Đổi tên nhóm và ảnh nhóm sau đó.
+    link.observe_raw(
+        "acc1",
+        raw(
+            {"LSSyncUpdateThreadName": [{"ThreadKey": 3858, "ThreadName": "VetGo mới"}]}
+        ),
+    )
+    link.observe_raw(
+        "acc1",
+        raw(
+            {
+                "LSSetThreadImageURL": [
+                    {"ThreadKey": 3858, "ImageURL": "https://cdn/g2.jpg"}
+                ]
+            }
+        ),
+    )
+    assert link.group_info("acc1", "e2ee:3858@g.us") == {
+        "name": "VetGo mới",
+        "picture": "https://cdn/g2.jpg",
+    }
+    assert link.group_info("acc2", "e2ee:3858@g.us") == {"name": "Khác"}

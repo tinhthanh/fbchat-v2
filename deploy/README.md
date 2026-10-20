@@ -87,7 +87,8 @@ Khi đặt `GATEWAY_URL` và `GATEWAY_TOKEN` (ít nhất 32 ký tự), `multi_ma
 
 - Trích dẫn: tin E2EE chỉ có `replyTo.messageId`, nên bot nhớ 4096 tin gần nhất mỗi tài khoản (khoá `tài khoản:messageId`) để gửi `quote` = `Tên: nội dung`.
 - Sticker tải về như ảnh; vị trí thành link Google Maps; link kèm mô tả.
-- Avatar: chat 1-1 gửi `thread_avatar` = `thumbSrc` của người nhắn (cùng lần tra tên); nhóm Facebook chưa có ảnh nhóm nhưng gửi `sender_avatar` của từng người để giao diện hiện avatar thành viên.
+- Avatar: chat 1-1 gửi `thread_avatar` = `thumbSrc` của người nhắn (cùng lần tra tên); nhóm gửi `sender_avatar` của từng người để giao diện hiện avatar thành viên.
+- Nhóm: chat E2EE có JID `<id>@g.us` là nhóm. Tin E2EE không mang tên nhóm, nên bot đọc tên/ảnh nhóm từ bảng LightSpeed trong sự kiện `raw` (`LSDeleteThenInsertThread`, `LSSyncUpdateThreadName`, `LSSetThreadImageURL`); chưa biết thì gửi tên trống và gateway đặt `👥 Nhóm Facebook` (không bao giờ lấy tên người gửi).
 - `AccountBot._forward_listener_event` chặn `e2eeReaction`, `reaction`, `messageEdit`, `messageUnsend` (SimpleBot upstream lọc bỏ) và gửi `POST /v1/event`, thành ghi chú nội bộ.
 - Tin có `senderId` là chính tài khoản (gửi từ thiết bị khác) thành ghi chú `owner_message`; tin do bot gửi qua `/send` được nhận ra bằng `messageId` trả về hoặc trùng nội dung trong 60 giây.
 - Tên Facebook không tra được (ẩn hồ sơ / không phải bạn bè) dùng nhãn `Facebook <id>` và được tra lại sau 1 giờ.
