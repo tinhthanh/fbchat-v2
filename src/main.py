@@ -29,6 +29,7 @@ from _messaging._listening_e2ee import (
     DELIVERY_STATUS_UNKNOWN,
     _format_exception_chain,
     _redact_bridge_text,
+    bridge_error_label,
     listeningE2EEEvent,
 )
 
@@ -330,10 +331,12 @@ class SimpleBot:
             log("e2ee", str(event_type))
             return None
         if event_type == "error":
+            # Không có code: socket rớt tạm, bridge tự kết nối lại (không phải lỗi thật).
+            label = bridge_error_label(data)
             if self.debug_errors:
-                log("e2ee", f"bridge error: {_redact_bridge_text(data)}")
+                log("e2ee", f"{label}: {_redact_bridge_text(data)}")
             else:
-                log("e2ee", "bridge error (chi tiết đã được ẩn)")
+                log("e2ee", f"{label} (chi tiết đã được ẩn)")
             return None
         if event_type not in MESSAGE_EVENT_TYPES:
             if self.debug_errors and event_type not in {"raw", None}:

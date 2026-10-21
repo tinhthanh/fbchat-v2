@@ -60,8 +60,7 @@ def _prepare_release(
     version = "9.8.7"
     binary_name = "fbchat-bridge-e2ee-windows-amd64.exe"
     download_url = (
-        "https://github.com/m008v/fbchat-v2/releases/download/"
-        f"v{version}/{binary_name}"
+        f"https://github.com/m008v/fbchat-v2/releases/download/v{version}/{binary_name}"
     )
     expected = hashlib.sha256(content).hexdigest()
     asset: dict[str, Any] = {
@@ -80,7 +79,7 @@ def _prepare_release(
 
     def get_release(url: str, **kwargs: Any) -> _ReleaseResponse:
         assert url == (
-            "https://api.github.com/repos/m008v/fbchat-v2/releases/tags/" f"v{version}"
+            f"https://api.github.com/repos/m008v/fbchat-v2/releases/tags/v{version}"
         )
         assert kwargs["follow_redirects"] is True
         return _ReleaseResponse({"tag_name": f"v{version}", "assets": [asset]}, url)
@@ -435,6 +434,39 @@ def test_listener_hides_bridge_error_payload(
     output = capsys.readouterr().out
     assert "SECRET_COOKIE" not in output
     assert "payload hidden" in output
+
+
+@pytest.mark.parametrize(
+    ("data", "label"),
+    [
+        (
+            {"message": "Messenger socket disconnected"},
+            "socket disconnected, reconnecting",
+        ),
+        ({"message": "x", "code": 0}, "socket disconnected, reconnecting"),
+        ({"message": "x", "code": 2}, "undecryptable e2ee message"),
+        ({"message": "x", "code": 1}, "bridge error (code 1)"),
+        (None, "socket disconnected, reconnecting"),
+    ],
+)
+def test_bridge_error_label_by_code(data: object, label: str) -> None:
+    assert e2ee.bridge_error_label(data) == label
+
+
+def test_listener_logs_transient_drop_without_bridge_error(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    listener = e2ee.listeningE2EEEvent.__new__(e2ee.listeningE2EEEvent)
+    listener._on_message = None
+    listener.debug_errors = False
+
+    listener._dispatch({"type": "error", "data": {"message": "SECRET socket"}})
+    listener._dispatch({"type": "error", "data": {"message": "SECRET", "code": 1}})
+
+    output = capsys.readouterr().out
+    assert "SECRET" not in output
+    assert output.count("bridge error") == 1
+    assert "socket disconnected, reconnecting (payload hidden)" in output
 
 
 def test_listener_can_explicitly_log_bridge_error_payload(

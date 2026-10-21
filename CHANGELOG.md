@@ -24,6 +24,11 @@ phiên bản tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
 ### Changed
 
+- Log sự kiện `error` của bridge E2EE theo `code`: không có code (socket rớt tạm,
+  messagix tự kết nối lại) ghi `socket disconnected, reconnecting`; code 2 ghi
+  `undecryptable e2ee message`; chỉ code 1 hoặc mã lạ mới ghi `bridge error`.
+  Helper mới `bridge_error_label()`. Payload vẫn ẩn trừ khi bật `debug_errors`.
+
 - Chuẩn hóa website thành giao diện VI/EN dùng chung DOM; metadata, ARIA,
   placeholder, tìm kiếm, nút sao chép và định dạng số đổi theo locale hiện tại.
 - Khôi phục lấy release và số sao theo thời gian thực từ GitHub API, chuẩn hóa

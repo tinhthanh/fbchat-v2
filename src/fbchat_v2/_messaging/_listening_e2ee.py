@@ -247,6 +247,21 @@ def _redact_bridge_text_fallback(value: str) -> str:
     return _BRIDGE_LONG_ID_PATTERN.sub(_BRIDGE_REDACTED, value)
 
 
+def bridge_error_label(data: object) -> str:
+    """Name a bridge ``error`` event by its code without exposing the payload.
+
+    The Go bridge sends no code for a transient socket drop (messagix
+    reconnects by itself and a ``reconnected`` event follows), code 1 for a
+    permanent connection failure and code 2 for an undecryptable E2EE message.
+    """
+    code = data.get("code") if isinstance(data, dict) else None
+    if not code:
+        return "socket disconnected, reconnecting"
+    if code == 2:
+        return "undecryptable e2ee message"
+    return f"bridge error (code {code})"
+
+
 def _redact_bridge_text(value: object) -> str:
     text = str(value)
     try:
@@ -1925,7 +1940,9 @@ class listeningE2EEEvent:
             detail = (
                 _redact_bridge_text(data) if self.debug_errors else "payload hidden"
             )
-            _safe_print(f"[{datetime.datetime.now()}] bridge error ({detail})")
+            _safe_print(
+                f"[{datetime.datetime.now()}] {bridge_error_label(data)} ({detail})"
+            )
 
         if self._on_message:
             try:
