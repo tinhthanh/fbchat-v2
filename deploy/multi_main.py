@@ -54,6 +54,7 @@ from gateway_link import (
     GatewayLink,
     undecryptable_message,
 )
+from session_keeper import keep_session
 
 ACCOUNTS_DIR = Path(
     os.environ.get("FBCHAT_ACCOUNTS_DIR", Path(__file__).resolve().parent / "accounts")
@@ -365,10 +366,16 @@ async def run_account(
             display_name, avatar = await _gateway.user_profile(bot, uid)
             _account_profiles[name].update(displayName=display_name, avatar=avatar)
     ready_task = asyncio.create_task(_notify_when_ready(bot, on_ready))
+    # Lưu cookie Facebook cấp lại và mở trang chủ mỗi ngày (cùng danh tính với
+    # bridge). Không dùng http_client chung: cookie jar của nó sẽ lẫn giữa tài khoản.
+    keeper_task = asyncio.create_task(
+        keep_session(config_path, bot.listener.get_cookies, log)
+    )
     try:
         await bot.run()
     finally:
         ready_task.cancel()
+        keeper_task.cancel()
         if _gateway is not None:
             _gateway.unregister(name, bot)
 

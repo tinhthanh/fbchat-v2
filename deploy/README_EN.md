@@ -55,6 +55,7 @@ FORCE_LOGIN=1 ACCOUNT=acc2 docker compose run --rm --service-ports login  # sign
 
 - `multi_main.py` writes each account's state (`starting`, `running`, `retrying`, `dropped`) to `FBCHAT_HEALTH_FILE` (`/tmp/fbchat-health.json` in the image).
 - The container is `healthy` only when every account is `running`; `docker compose ps` shows `unhealthy` while an account is retrying or dropped.
+- Keeping sessions: every request (HTTP and the E2EE bridge) uses the same browser identity (Linux, Chrome 141) instead of rotating User-Agents. Ten minutes after connecting and then daily (± 2 hours), the bot takes the current cookies from the bridge (`getCookies`), opens the Facebook home page once with them and saves the cookies Facebook hands back to `config.json` (`deploy/session_keeper.py`). It saves only when `c_user` is unchanged, `xs` is present and the home page is still signed in; it never drops keys and logs only the names of changed cookies. No need to open a browser every day: a second session (or sharing the cookie with a browser) is what Facebook tends to treat as suspicious.
 - The bot uses `restart: unless-stopped`. When every account is dropped, the process keeps running (it does not exit) so Docker does not restart it and call Facebook with broken cookies again. Sign in again and run `docker compose restart bot`.
 
 ## 📊 Resources

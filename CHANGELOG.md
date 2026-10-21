@@ -14,6 +14,12 @@ phiên bản tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
 ### Added
 
+- Bridge RPC `getCookies` trả cookie hiện tại của phiên (messagix cập nhật từ
+  Set-Cookie); Python `listeningE2EEEvent.get_cookies()` /
+  `get_cookies_blocking()` (bridge cũ không có method thì trả `{}`).
+- Deploy: `session_keeper.py` lưu cookie Facebook cấp lại và mở trang chủ mỗi
+  ngày cùng danh tính trình duyệt, thay cho việc giữ trình duyệt mở để "giữ phiên".
+
 - Thêm `website/validate_i18n.py` để kiểm tra cấu trúc song ngữ, các cặp VI/EN,
   tab/panel, liên kết nội bộ và nội dung bị rò giữa hai locale.
 - Thay spinner cũ bằng package-stream preloader dùng lệnh `pip`, tiến trình

@@ -55,6 +55,7 @@ FORCE_LOGIN=1 ACCOUNT=acc2 docker compose run --rm --service-ports login  # đă
 
 - `multi_main.py` ghi trạng thái từng tài khoản (`starting`, `running`, `retrying`, `dropped`) vào `FBCHAT_HEALTH_FILE` (`/tmp/fbchat-health.json` trong image).
 - Container chỉ `healthy` khi mọi tài khoản là `running`; `docker compose ps` hiện `unhealthy` khi có tài khoản đang thử lại hoặc bị bỏ.
+- Giữ phiên: mọi request (HTTP lẫn bridge E2EE) dùng cùng một danh tính trình duyệt (Linux, Chrome 141), không xoay User-Agent. 10 phút sau khi kết nối rồi mỗi ngày (± 2 giờ), bot lấy cookie hiện tại từ bridge (`getCookies`), mở trang chủ Facebook một lần bằng cookie đó và lưu cookie Facebook cấp lại vào `config.json` (`deploy/session_keeper.py`). Chỉ lưu khi `c_user` không đổi, `xs` còn và trang chủ vẫn đăng nhập; không xoá khoá cũ, log chỉ ghi tên cookie đổi. Không cần mở trình duyệt hằng ngày: phiên thứ hai (hoặc dùng chung cookie trên trình duyệt) dễ bị Facebook coi là bất thường.
 - Bot dùng `restart: unless-stopped`. Khi mọi tài khoản bị bỏ, tiến trình vẫn chạy (không thoát) để Docker không restart và gọi lại Facebook bằng cookie hỏng. Hãy đăng nhập lại rồi `docker compose restart bot`.
 
 ## 📊 Tài nguyên

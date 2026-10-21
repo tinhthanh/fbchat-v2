@@ -132,6 +132,10 @@ async def test_run_account_builds_account_bot(
     class _FakeBot:
         def __init__(self, dataFB: dict[str, Any], **options: Any) -> None:
             created.append(options)
+            self.listener = self
+
+        async def get_cookies(self) -> dict[str, str]:
+            return {}
 
         async def run(self) -> None:
             return None
