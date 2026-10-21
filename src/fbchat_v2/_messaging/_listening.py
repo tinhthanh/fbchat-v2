@@ -32,7 +32,12 @@ from urllib.parse import urlparse
 import paho.mqtt.client as mqtt
 
 from fbchat_v2._core._console import safe_print as _safe_print
-from fbchat_v2._core._utils import generate_client_id, generate_session_id, json_minimal
+from fbchat_v2._core._utils import (
+    BROWSER_USER_AGENT,
+    generate_client_id,
+    generate_session_id,
+    json_minimal,
+)
 from fbchat_v2._features._thread import _all_thread_data
 
 DEFAULT_MESSAGE_QUEUE_MAXSIZE = 1000
@@ -351,7 +356,7 @@ class listeningEvent:
             headers={
                 "Cookie": self.dataFB["cookieFacebook"],
                 "Origin": "https://www.facebook.com",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/137 Safari/537.36",
+                "User-Agent": BROWSER_USER_AGENT,
                 "Referer": "https://www.facebook.com/",
                 "Host": "edge-chat.facebook.com",
             },

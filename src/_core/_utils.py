@@ -34,13 +34,25 @@ import httpx
 
 from _core._http import get_async, get_blocking, post_async, post_blocking
 
-# User-Agent pool — xoay ngẫu nhiên để giảm fingerprint detection từ Facebook
-_USER_AGENTS: list[str] = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
-]
-_SEC_CH_UA = '"Chromium";v="137", "Not;A=Brand";v="24", "Google Chrome";v="137"'
+# Một danh tính trình duyệt duy nhất cho mọi request, trùng với bridge E2EE
+# (bridge-e2ee/meta/pkg/messagix/useragent/useragent.go). Một phiên đã đăng nhập
+# mà đổi User-Agent/hệ điều hành giữa các request trông như phiên bị đánh cắp,
+# nên không xoay ngẫu nhiên. Đổi phiên bản Chrome thì đổi cùng lúc ở bridge.
+BROWSER_CHROME_VERSION = "141"
+BROWSER_CHROME_VERSION_FULL = f"{BROWSER_CHROME_VERSION}.0.7390.122"
+BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    f"Chrome/{BROWSER_CHROME_VERSION}.0.0.0 Safari/537.36"
+)
+BROWSER_SEC_CH_UA = (
+    f'"Chromium";v="{BROWSER_CHROME_VERSION}", '
+    f'"Google Chrome";v="{BROWSER_CHROME_VERSION}", "Not-A.Brand";v="99"'
+)
+BROWSER_SEC_CH_UA_FULL = (
+    f'"Chromium";v="{BROWSER_CHROME_VERSION_FULL}", '
+    f'"Google Chrome";v="{BROWSER_CHROME_VERSION_FULL}", "Not-A.Brand";v="99.0.0.0"'
+)
+BROWSER_PLATFORM = '"Linux"'
 _REQUEST_COUNTER = count(1)
 
 
@@ -50,16 +62,16 @@ def Headers(
     headers: dict[str, str] = {}
     headers["Host"] = Host
     headers["Connection"] = "keep-alive"
-    headers["User-Agent"] = random.choice(_USER_AGENTS)
+    headers["User-Agent"] = BROWSER_USER_AGENT
     headers["Accept"] = "*/*"
     headers["Origin"] = "https://" + Host
     headers["Sec-Fetch-Site"] = "same-origin"
     headers["Sec-Fetch-Mode"] = "cors"
     headers["Sec-Fetch-Dest"] = "empty"
     headers["Referer"] = "https://" + Host
-    headers["sec-ch-ua"] = _SEC_CH_UA
+    headers["sec-ch-ua"] = BROWSER_SEC_CH_UA
     headers["sec-ch-ua-mobile"] = "?0"
-    headers["sec-ch-ua-platform"] = '"Windows"'
+    headers["sec-ch-ua-platform"] = BROWSER_PLATFORM
     headers["Accept-Language"] = "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7"
     return headers
 

@@ -23,7 +23,6 @@ from __future__ import annotations
 import asyncio
 import json
 import mimetypes
-import random
 from itertools import count
 from pathlib import Path
 from typing import Any
@@ -31,16 +30,8 @@ from typing import Any
 import httpx
 import requests
 
-from fbchat_v2._core._utils import str_base
+from fbchat_v2._core._utils import BROWSER_USER_AGENT, str_base
 
-USER_AGENTS: tuple[str, ...] = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_2) AppleWebKit/537.36 Chrome/42.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_3) AppleWebKit/601.1.10 Version/8.0.5 Safari/601.1.10",
-    "Mozilla/5.0 (Windows NT 6.3; WOW64; ; NCT50_AAP285C84A1328) AppleWebKit/537.36 Chrome/42.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.1 Chrome/22.0 Safari/537.1",
-    "Mozilla/5.0 (X11; CrOS i686 2268.111.0) AppleWebKit/536.11 Chrome/20.0 Safari/536.11",
-    "Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/536.6 Chrome/20.0 Safari/536.6",
-)
 _UPLOAD_URL = "https://upload.facebook.com/ajax/mercury/upload.php"
 _REQUEST_COUNTER = count(1)
 _LEGACY_ATTACHMENT_ID_KEYS = (
@@ -114,7 +105,7 @@ def _build_request(
         "headers": {
             "Referer": "https://www.facebook.com",
             "Accept": "text/html",
-            "User-Agent": random.choice(USER_AGENTS),
+            "User-Agent": BROWSER_USER_AGENT,
             "Cookie": dataFB["cookieFacebook"],
         },
         "data": {

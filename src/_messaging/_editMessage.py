@@ -29,6 +29,7 @@ from urllib.parse import urlparse
 import paho.mqtt.client as mqtt
 
 from _core._utils import (
+    BROWSER_USER_AGENT,
     generate_session_id,
     generate_client_id,
     gen_threading_id,
@@ -134,7 +135,7 @@ def _make_mqtt_client(dataFB: dict[str, Any]) -> mqtt.Client:
         headers={
             "Cookie": dataFB["cookieFacebook"],
             "Origin": "https://www.facebook.com",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0 Safari/537.36",
+            "User-Agent": BROWSER_USER_AGENT,
             "Referer": "https://www.facebook.com/",
             "Host": MQTT_HOST,
         },

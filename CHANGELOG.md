@@ -24,6 +24,13 @@ phiên bản tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
 ### Changed
 
+- Mọi request HTTP dùng một danh tính trình duyệt duy nhất (`BROWSER_USER_AGENT`,
+  `BROWSER_SEC_CH_UA`, `BROWSER_PLATFORM` trong `_core._utils`), trùng với bridge
+  E2EE (Linux, Chrome 141). Trước đây User-Agent xoay ngẫu nhiên Windows/Mac/Linux
+  mỗi request, `sec-ch-ua-platform` luôn là Windows, upload dùng UA Chrome 20-42 và
+  homepage/sửa tin/listener thường mỗi nơi một UA: một phiên mang nhiều "thiết bị"
+  là dấu hiệu Facebook dùng để huỷ phiên. Test so sánh với `useragent.go`.
+
 - Log sự kiện `error` của bridge E2EE theo `code`: không có code (socket rớt tạm,
   messagix tự kết nối lại) ghi `socket disconnected, reconnecting`; code 2 ghi
   `undecryptable e2ee message`; chỉ code 1 hoặc mã lạ mới ghi `bridge error`.
