@@ -406,6 +406,7 @@ listener = listeningE2EEEvent(
 | `connect_mqtt()` | Async | Launch, connect, and poll the bridge |
 | `send_message(...)` | Async | Send a regular message through the bridge |
 | `send_e2ee_message(...)` | Async | Send encrypted text |
+| `get_cookies()` | Async | The session's current cookies in the bridge (with Facebook's Set-Cookie applied), to save them; older bridges return `{}`. `get_cookies_blocking()` also exists |
 | `stop()` | Sync signal | Stop the listener and bridge |
 
 ### Thread-safe callback handoff

@@ -264,6 +264,7 @@ Python `_BridgeProcess` giới hạn request JSON-RPC ở 150 MiB. Dữ liệu m
 | `connect` | Kết nối Messenger transport thường |
 | `connectE2EE` | Bật E2EE session |
 | `isConnected` | Kiểm tra trạng thái |
+| `getCookies` | Cookie hiện tại của phiên `{"cookies": {...}}` (messagix cập nhật từ Set-Cookie); chưa có client thì rỗng |
 | `disconnect` | Đóng client và context |
 
 ### Send thường

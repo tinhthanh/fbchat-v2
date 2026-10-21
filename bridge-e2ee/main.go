@@ -18,7 +18,7 @@
 //
 //	{"event": {"type": "<name>", "data": {...}, "timestamp": <ms>}}
 //
-// Methods: hello, newClient, connect, connectE2EE, isConnected, disconnect,
+// Methods: hello, newClient, connect, connectE2EE, isConnected, getCookies, disconnect,
 // sendMessage, sendReaction, sendE2EEMessage, sendE2EEReaction,
 // sendImage, sendFile, sendE2EESticker, sendE2EEVideo, sendE2EEDocument.
 //
@@ -70,6 +70,7 @@ var bridgeCapabilities = []string{
 	"connectE2EE",
 	"isConnected",
 	"events",
+	"getCookies",
 }
 
 var (
@@ -169,6 +170,17 @@ func handle(req *request) {
 			"connected":     client.IsConnected(),
 			"e2eeConnected": client.IsE2EEConnected(),
 		})
+
+	case "getCookies":
+		// Cookie hiện tại của phiên (messagix cập nhật từ Set-Cookie của Facebook)
+		// để Python lưu lại; không có client thì trả rỗng.
+		cookies := map[string]string{}
+		if client != nil {
+			if got := client.GetCookies(); got != nil {
+				cookies = got
+			}
+		}
+		ok(req.ID, map[string]interface{}{"cookies": cookies})
 
 	case "sendMessage":
 		if client == nil {

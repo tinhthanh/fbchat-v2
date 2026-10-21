@@ -2010,6 +2010,30 @@ class listeningE2EEEvent:
             raise RuntimeError("Chưa kết nối — gọi connect_mqtt() trước.")
         return bridge
 
+    def get_cookies_blocking(self) -> dict[str, str]:
+        """Current session cookies as the bridge holds them.
+
+        messagix applies Facebook's Set-Cookie updates in memory; callers save
+        them so a restart does not fall back to the cookies from login. Bridges
+        without ``getCookies`` (older binaries) return an empty dict.
+        """
+        bridge = self._require_bridge()
+        try:
+            result = bridge.call_blocking(
+                "getCookies", timeout=bridge.HEALTH_RPC_TIMEOUT
+            )
+        except BridgeError as exc:
+            if "unknown method" in str(exc):
+                return {}
+            raise
+        cookies = result.get("cookies") if isinstance(result, dict) else None
+        if not isinstance(cookies, dict):
+            return {}
+        return {str(k): str(v) for k, v in cookies.items() if k and v}
+
+    async def get_cookies(self) -> dict[str, str]:
+        return await asyncio.to_thread(self.get_cookies_blocking)
+
     def send_message_blocking(
         self, thread_id: int, text: str, reply_to_id: str = ""
     ) -> dict[str, Any]:

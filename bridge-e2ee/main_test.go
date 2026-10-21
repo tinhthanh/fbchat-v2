@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -20,7 +22,7 @@ func TestHelloPayloadDeclaresCompatibleContract(t *testing.T) {
 	if !ok {
 		t.Fatalf("capabilities has type %T, want []string", payload["capabilities"])
 	}
-	for _, required := range []string{"newClient", "connect", "connectE2EE", "isConnected", "events"} {
+	for _, required := range []string{"newClient", "connect", "connectE2EE", "isConnected", "events", "getCookies"} {
 		if !slices.Contains(capabilities, required) {
 			t.Errorf("capabilities does not contain %q", required)
 		}
@@ -34,5 +36,30 @@ func TestServeRequestsRejectsOversizedLine(t *testing.T) {
 
 	if err == nil {
 		t.Fatal("serveRequests() accepted a request larger than its hard limit")
+	}
+}
+
+func TestGetCookiesWithoutClientReturnsEmptyMap(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout := os.Stdout
+	os.Stdout = w
+	handle(&request{ID: 7, Method: "getCookies"})
+	os.Stdout = stdout
+	w.Close()
+	var resp struct {
+		ID   uint64 `json:"id"`
+		OK   bool   `json:"ok"`
+		Data struct {
+			Cookies map[string]string `json:"cookies"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(r).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.ID != 7 || !resp.OK || resp.Data.Cookies == nil || len(resp.Data.Cookies) != 0 {
+		t.Fatalf("getCookies without client = %+v", resp)
 	}
 }

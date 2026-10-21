@@ -454,6 +454,7 @@ listener = listeningE2EEEvent(
 | `connect_mqtt()` | async | Khởi chạy bridge, kết nối và đọc event |
 | `send_message(...)` | async | Gửi tin thường qua bridge |
 | `send_e2ee_message(...)` | async | Gửi văn bản E2EE |
+| `get_cookies()` | async | Cookie hiện tại của phiên trong bridge (đã áp Set-Cookie của Facebook) để lưu lại; bridge cũ trả `{}`. Có `get_cookies_blocking()` |
 | `stop()` | tín hiệu đồng bộ | Dừng listener và bridge |
 
 ### Callback thread-safe
