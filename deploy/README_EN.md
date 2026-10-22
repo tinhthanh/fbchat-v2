@@ -2,7 +2,7 @@
 
 [Tiếng Việt](README.md)
 
-This directory is the fork-only part of the repository: it runs the sample bot in Docker, signs in to Facebook through a web-based browser (noVNC) and runs several accounts in one container. Everything lives in `deploy/` and no upstream file is modified, so syncing with the original repository does not conflict.
+This directory is the fork-only part of the repository: it runs the sample bot in Docker, signs in to Facebook through a web-based browser (noVNC) and runs several accounts in one container. Most of it lives in `deploy/`, but the fork also changes some library files (see [Syncing with upstream](#-syncing-with-upstream)), so merges from the original repository can conflict in those files.
 
 ## 📂 Layout
 
@@ -15,11 +15,15 @@ deploy/
 │   └── control.py              # fb-login-ui service: browser on demand
 ├── bot/                        # python:3.12-alpine + statically built Go bridge
 │   ├── Dockerfile
-│   └── Dockerfile.dockerignore # per-Dockerfile ignore file (BuildKit), root untouched
-├── multi_main.py               # multi-account runner, uses only src/main.py APIs
+│   └── Dockerfile.dockerignore # per-Dockerfile allowlist (BuildKit), root untouched
+├── multi_main.py               # multi-account runner built on SimpleBot from src/main.py
 ├── gateway_link.py             # omnichannel gateway link (when GATEWAY_URL is set)
+├── session_keeper.py           # keeps the Facebook session fresh: saves reissued cookies
+├── connection_history.py       # per-account connection history (history.json)
 └── tests/                      # runner tests + contract tests against upstream
 ```
+
+`Dockerfile.dockerignore` is an allowlist: a new Python file for the bot must be added both as a `!deploy/<file>` line there and to the `COPY` line in `deploy/bot/Dockerfile`, or the image will miss it.
 
 ## 🚀 Quick start
 
@@ -54,7 +58,7 @@ FORCE_LOGIN=1 ACCOUNT=acc2 docker compose run --rm --service-ports login  # sign
 ## 🩺 Healthcheck and restarts
 
 - `multi_main.py` writes each account's state (`starting`, `running`, `retrying`, `dropped`) to `FBCHAT_HEALTH_FILE` (`/tmp/fbchat-health.json` in the image).
-- The container is `healthy` only when every account is `running`; `docker compose ps` shows `unhealthy` while an account is retrying or dropped.
+- The container is `healthy` only when every account is `running`; `docker compose ps` shows `unhealthy` while an account is retrying or dropped. With no accounts at all it is `healthy` only in gateway mode (`GATEWAY_URL` set); standalone still needs at least one account, otherwise the container stops right at startup.
 - Keeping sessions: every request (HTTP and the E2EE bridge) uses the same browser identity (Linux, Chrome 141) instead of rotating User-Agents. Ten minutes after connecting and then daily (± 2 hours), the bot takes the current cookies from the bridge (`getCookies`), opens the Facebook home page once with them and saves the cookies Facebook hands back to `config.json` (`deploy/session_keeper.py`). It saves only when `c_user` is unchanged, `xs` is present and the home page is still signed in; it never drops keys and logs only the names of changed cookies. No need to open a browser every day: a second session (or sharing the cookie with a browser) is what Facebook tends to treat as suspicious.
 - The bot uses `restart: unless-stopped`. When every account is dropped, the process keeps running (it does not exit) so Docker does not restart it and call Facebook with broken cookies again. Sign in again and run `docker compose restart bot`.
 
@@ -114,7 +118,7 @@ The bot's HTTP server (same `GATEWAY_TOKEN` as `/send`) also serves routes for t
 
 The account's own name/picture comes from `/chat/user_info`; some accounts cannot look themselves up, so the LightSpeed contact tables (`LSDeleteThenInsertContact`, `LSVerifyContactRowExists`) sent on connect fill it in. The same tables also name customers found in the contact list.
 
-`AccountManager` (in `multi_main.py`) runs each account in its own task; stopping or reconnecting cancels the task and `SimpleBot.run()` stops the bridge. With the gateway enabled the bot also starts with no accounts.
+`AccountManager` (in `multi_main.py`) runs each account in its own task; stopping or reconnecting cancels the task and `SimpleBot.run()` stops the bridge. With the gateway enabled the bot also starts with no accounts and the healthcheck stays `healthy`; standalone (no `GATEWAY_URL`) still needs at least one account.
 
 Browser sign-in uses the `fb-login-ui` service (`login/` image, `control.py` command): idle it is only the control server (~20 MiB); `POST /session {"account"}` runs `extract_cookie.py` with `FORCE_LOGIN=1` (Chromium + noVNC on port 6080), `GET /session` reports `starting` until noVNC accepts connections, then `running`, `saving` once `extract_cookie.py` saw the sign-in and closed Chromium to flush cookies, and `success` once the cookie is written; `DELETE /session` cancels. One session at a time; the Chromium profile is wiped before and after each session so the next account never inherits cookies. The control server requires `GATEWAY_TOKEN` and does not log URLs or headers.
 
@@ -143,7 +147,7 @@ git merge upstream/main          # or: git rebase upstream/main
 cd deploy && docker compose build && docker compose up -d
 ```
 
-Because the fork only adds files under `deploy/`, merges do not conflict. The remaining risk is upstream changing an API that `multi_main.py` relies on; to catch that, run:
+The fork does not only add files under `deploy/`: it also changes `src/_core/_utils.py`, `src/_core/_session.py`, `src/_messaging/_listening_e2ee.py`, `_attachments.py`, `_editMessage.py`, `_listening.py`, `src/main.py`, `bridge-e2ee/main.go`, `CHANGELOG.md` and `CLAUDE.md` (plus the generated copies in `src/fbchat_v2/`). Merges can conflict in these files; preview them with `git diff upstream/main -- . ':!deploy'`. The remaining risk is upstream changing an API that the code in `deploy/` relies on; to catch that, run:
 
 ```bash
 pytest deploy/tests
@@ -151,6 +155,15 @@ pytest deploy/tests
 
 Upstream touch points (checked by `test_upstream_contract_used_by_fork`):
 
-- `src/main.py`: `SimpleBot` (parameters `prefix`, `admins`, `log_message_content`, `debug_errors`, `http_client`; method `_queue_event`), `log`, `DEFAULT_HTTP_TIMEOUT`, `is_valid_datafb`.
-- `listeningE2EEEvent`: attributes `device_path`, `startup_timeout`, `wait_until_connected(timeout, require_e2ee=...)`.
+- `src/main.py`: `SimpleBot` (parameters `prefix`, `admins`, `log_message_content`, `debug_errors`, `http_client`; methods `_queue_event`, `_forward_listener_event`), `log`, `DEFAULT_HTTP_TIMEOUT`, `is_valid_datafb`.
+- `listeningE2EEEvent`: attributes `device_path`, `e2ee_memory_only`, `startup_timeout`, `wait_until_connected(timeout, require_e2ee=...)`.
 - `dataGetHome(storage=...)`, `FileSessionStorage`, `set_private_file_permissions`.
+
+Other touch points (not checked directly by the test, but a broken import fails the tests too):
+
+- `listeningE2EEEvent.get_cookies()` (`multi_main.py`, for `session_keeper.py`).
+- `_core._session._build_home_request`, `_core._utils.parse_cookie_string`, `send_get_request_async` (`session_keeper.py`, `connection_history.py`).
+- `_core._console.configure_utf8_console`, `_messaging._listening_e2ee._format_exception_chain` (`multi_main.py`).
+- `BridgeActions`, `_features._facebook._get_user_info` (`gateway_link.py`).
+
+`_build_home_request` and `_format_exception_chain` are internal helpers that upstream may change without notice.

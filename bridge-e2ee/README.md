@@ -324,7 +324,17 @@ Event lifecycle:
 | `e2eeConnected` | E2EE handshake hoàn tất |
 | `reconnected` | Transport reconnect |
 | `disconnected` | Mất kết nối |
-| `error` | Lỗi protocol/transport |
+| `error` | Lỗi protocol/transport, phân theo `code` (xem bên dưới) |
+
+Sự kiện `error` theo `code`:
+
+| `code` | Ý nghĩa |
+|---|---|
+| không có | Socket Messenger rớt tạm; messagix tự kết nối lại, sau đó có `reconnected` |
+| `1` | Kết nối Messenger lỗi vĩnh viễn |
+| `2` | Tin E2EE không giải mã được |
+
+Python `bridge_error_label()` (trong `_listening_e2ee`) đặt nhãn log theo code này mà không in payload: `socket disconnected, reconnecting`, `undecryptable e2ee message` hoặc `bridge error (code N)`.
 
 Message event:
 
@@ -332,6 +342,8 @@ Message event:
 |---|---|
 | `message` | Tin thường |
 | `e2eeMessage` | Tin cá nhân đã giải mã |
+
+Bridge còn phát các event khác (xem `bridge/events.go`): `raw` (event gốc của messagix/whatsmeow, gồm bảng LightSpeed), `messageEdit`, `messageUnsend`, `reaction`, `e2eeReaction`, `typing`, `readReceipt`, `e2eeReceipt` và `deviceDataChanged`.
 
 Ví dụ `e2eeMessage`:
 

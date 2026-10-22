@@ -256,6 +256,10 @@ payload = await post_form_json_async(
 )
 ```
 
+### Browser identity
+
+Every request uses one fixed browser identity (Linux, Chrome 141): `BROWSER_USER_AGENT`, `BROWSER_SEC_CH_UA` and `BROWSER_PLATFORM`, with no User-Agent rotation. It must match the E2EE bridge (`bridge-e2ee/meta/pkg/messagix/useragent/useragent.go`), because one session showing several browsers or operating systems is what Facebook tends to revoke. Change the Chrome version in both places at once; `tests/test_browser_identity.py` fails when they drift apart.
+
 ### Form builder
 
 `formAll(dataFB, friendlyName, docID, requireGraphql=True)` adds common session tokens and Facebook metadata. Pass `requireGraphql=False` for non-GraphQL form endpoints.

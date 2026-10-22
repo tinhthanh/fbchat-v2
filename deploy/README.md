@@ -2,7 +2,7 @@
 
 [English](README_EN.md)
 
-Thư mục này là phần riêng của fork: chạy bot mẫu trong Docker, đăng nhập Facebook qua trình duyệt trên web (noVNC) và chạy nhiều tài khoản trong một container. Mọi thứ nằm trong `deploy/`, không sửa file nào của upstream, nên đồng bộ với repo gốc không bị conflict.
+Thư mục này là phần riêng của fork: chạy bot mẫu trong Docker, đăng nhập Facebook qua trình duyệt trên web (noVNC) và chạy nhiều tài khoản trong một container. Phần lớn nằm trong `deploy/`, nhưng fork cũng sửa một số file của thư viện (xem [Đồng bộ với upstream](#-đồng-bộ-với-upstream)), nên merge từ repo gốc có thể conflict ở các file đó.
 
 ## 📂 Cấu trúc
 
@@ -15,11 +15,15 @@ deploy/
 │   └── control.py              # dịch vụ fb-login-ui: bật trình duyệt theo yêu cầu
 ├── bot/                        # python:3.12-alpine + bridge Go build tĩnh
 │   ├── Dockerfile
-│   └── Dockerfile.dockerignore # ignore file riêng (BuildKit), không đụng thư mục gốc
-├── multi_main.py               # runner nhiều tài khoản, chỉ dùng API của src/main.py
+│   └── Dockerfile.dockerignore # allowlist riêng (BuildKit), không đụng thư mục gốc
+├── multi_main.py               # runner nhiều tài khoản, dựa trên SimpleBot của src/main.py
 ├── gateway_link.py             # nối với omnichannel gateway (khi có GATEWAY_URL)
+├── session_keeper.py           # giữ phiên Facebook: lưu cookie Facebook cấp lại
+├── connection_history.py       # lịch sử kết nối từng tài khoản (history.json)
 └── tests/                      # test runner + contract test với upstream
 ```
+
+`Dockerfile.dockerignore` là allowlist: thêm file Python mới cho bot thì phải thêm cả dòng `!deploy/<file>` vào đó và vào lệnh `COPY` trong `deploy/bot/Dockerfile`, nếu không image sẽ thiếu file.
 
 ## 🚀 Bắt đầu nhanh
 
@@ -54,7 +58,7 @@ FORCE_LOGIN=1 ACCOUNT=acc2 docker compose run --rm --service-ports login  # đă
 ## 🩺 Healthcheck và restart
 
 - `multi_main.py` ghi trạng thái từng tài khoản (`starting`, `running`, `retrying`, `dropped`) vào `FBCHAT_HEALTH_FILE` (`/tmp/fbchat-health.json` trong image).
-- Container chỉ `healthy` khi mọi tài khoản là `running`; `docker compose ps` hiện `unhealthy` khi có tài khoản đang thử lại hoặc bị bỏ.
+- Container chỉ `healthy` khi mọi tài khoản là `running`; `docker compose ps` hiện `unhealthy` khi có tài khoản đang thử lại hoặc bị bỏ. Chưa có tài khoản nào thì chỉ `healthy` ở chế độ gateway (có `GATEWAY_URL`); chạy riêng lẻ vẫn cần ít nhất một tài khoản, nếu không container dừng ngay khi khởi động.
 - Giữ phiên: mọi request (HTTP lẫn bridge E2EE) dùng cùng một danh tính trình duyệt (Linux, Chrome 141), không xoay User-Agent. 10 phút sau khi kết nối rồi mỗi ngày (± 2 giờ), bot lấy cookie hiện tại từ bridge (`getCookies`), mở trang chủ Facebook một lần bằng cookie đó và lưu cookie Facebook cấp lại vào `config.json` (`deploy/session_keeper.py`). Chỉ lưu khi `c_user` không đổi, `xs` còn và trang chủ vẫn đăng nhập; không xoá khoá cũ, log chỉ ghi tên cookie đổi. Không cần mở trình duyệt hằng ngày: phiên thứ hai (hoặc dùng chung cookie trên trình duyệt) dễ bị Facebook coi là bất thường.
 - Bot dùng `restart: unless-stopped`. Khi mọi tài khoản bị bỏ, tiến trình vẫn chạy (không thoát) để Docker không restart và gọi lại Facebook bằng cookie hỏng. Hãy đăng nhập lại rồi `docker compose restart bot`.
 
@@ -114,7 +118,7 @@ Server HTTP của bot (cùng `GATEWAY_TOKEN` với `/send`) có thêm các route
 
 Tên/ảnh của chính tài khoản lấy từ `/chat/user_info`; một số tài khoản không tra được chính mình, khi đó lấy từ bảng danh bạ LightSpeed (`LSDeleteThenInsertContact`, `LSVerifyContactRowExists`) bridge gửi lúc kết nối. Bảng này cũng điền tên cho khách có trong danh bạ.
 
-`AccountManager` (trong `multi_main.py`) chạy mỗi tài khoản trong một task; dừng hoặc kết nối lại là huỷ task, `SimpleBot.run()` tự dừng bridge. Khi bật gateway, bot vẫn khởi động khi chưa có tài khoản nào.
+`AccountManager` (trong `multi_main.py`) chạy mỗi tài khoản trong một task; dừng hoặc kết nối lại là huỷ task, `SimpleBot.run()` tự dừng bridge. Khi bật gateway, bot vẫn khởi động khi chưa có tài khoản nào, và healthcheck vẫn `healthy`; chạy riêng lẻ (không có `GATEWAY_URL`) vẫn cần ít nhất một tài khoản.
 
 Đăng nhập bằng trình duyệt dùng dịch vụ `fb-login-ui` (image `login/`, lệnh `control.py`): rảnh chỉ có server điều khiển (~20 MiB); `POST /session {"account"}` chạy `extract_cookie.py` với `FORCE_LOGIN=1` (Chromium + noVNC cổng 6080), `GET /session` trả `starting` tới khi noVNC sẵn sàng rồi `running`, `saving` khi `extract_cookie.py` đã thấy đăng nhập và đóng Chromium để ghi cookie, `success` khi đã ghi cookie, `DELETE /session` huỷ. Mỗi lúc một phiên; hồ sơ Chromium bị xoá trước và sau mỗi phiên để tài khoản sau không nhận nhầm cookie. Server điều khiển cần `GATEWAY_TOKEN` và không log URL/header.
 
@@ -143,7 +147,7 @@ git merge upstream/main          # hoặc: git rebase upstream/main
 cd deploy && docker compose build && docker compose up -d
 ```
 
-Vì fork chỉ thêm file trong `deploy/`, merge không conflict. Rủi ro còn lại là upstream đổi API mà `multi_main.py` dựa vào; khi đó chạy:
+Fork không chỉ thêm file trong `deploy/`: nó còn sửa `src/_core/_utils.py`, `src/_core/_session.py`, `src/_messaging/_listening_e2ee.py`, `_attachments.py`, `_editMessage.py`, `_listening.py`, `src/main.py`, `bridge-e2ee/main.go`, `CHANGELOG.md` và `CLAUDE.md` (cùng bản sinh trong `src/fbchat_v2/`). Merge có thể conflict ở các file này; xem trước bằng `git diff upstream/main -- . ':!deploy'`. Rủi ro còn lại là upstream đổi API mà code trong `deploy/` dựa vào; khi đó chạy:
 
 ```bash
 pytest deploy/tests
@@ -151,6 +155,15 @@ pytest deploy/tests
 
 Các điểm bám vào upstream (được `test_upstream_contract_used_by_fork` kiểm tra):
 
-- `src/main.py`: `SimpleBot` (tham số `prefix`, `admins`, `log_message_content`, `debug_errors`, `http_client`; method `_queue_event`), `log`, `DEFAULT_HTTP_TIMEOUT`, `is_valid_datafb`.
-- `listeningE2EEEvent`: thuộc tính `device_path`, `startup_timeout`, `wait_until_connected(timeout, require_e2ee=...)`.
+- `src/main.py`: `SimpleBot` (tham số `prefix`, `admins`, `log_message_content`, `debug_errors`, `http_client`; method `_queue_event`, `_forward_listener_event`), `log`, `DEFAULT_HTTP_TIMEOUT`, `is_valid_datafb`.
+- `listeningE2EEEvent`: thuộc tính `device_path`, `e2ee_memory_only`, `startup_timeout`, `wait_until_connected(timeout, require_e2ee=...)`.
 - `dataGetHome(storage=...)`, `FileSessionStorage`, `set_private_file_permissions`.
+
+Các điểm bám khác (test không kiểm trực tiếp, nhưng import hỏng thì test cũng lỗi):
+
+- `listeningE2EEEvent.get_cookies()` (`multi_main.py`, cho `session_keeper.py`).
+- `_core._session._build_home_request`, `_core._utils.parse_cookie_string`, `send_get_request_async` (`session_keeper.py`, `connection_history.py`).
+- `_core._console.configure_utf8_console`, `_messaging._listening_e2ee._format_exception_chain` (`multi_main.py`).
+- `BridgeActions`, `_features._facebook._get_user_info` (`gateway_link.py`).
+
+`_build_home_request` và `_format_exception_chain` là helper nội bộ, upstream có thể đổi mà không báo trước.

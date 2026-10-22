@@ -407,6 +407,7 @@ listener = listeningE2EEEvent(
 | `connect_mqtt()` | Async | Launch, connect, and poll the bridge |
 | `send_message(...)` | Async | Send a regular message through the bridge |
 | `send_e2ee_message(...)` | Async | Send encrypted text |
+| `get_cookies()` | Async | The session's current cookies in the bridge (with Facebook's Set-Cookie applied), to save them; older bridges return `{}`. `get_cookies_blocking()` also exists |
 | `stop()` | Sync signal | Stop the listener and bridge |
 
 ### Thread-safe callback handoff
@@ -470,6 +471,8 @@ chain and identifies the failed step, so the outer timeout does not hide the cau
 ```
 
 Common event types include `ready`, `e2eeConnected`, `message`, `e2eeMessage`, `reconnected`, `disconnected`, `error`, and `bridge_fatal`.
+
+An `error` event without a `code` is a transient socket drop that the bridge reconnects from by itself; `code` 1 is a permanent connection failure and `code` 2 is an E2EE message that could not be decrypted. `bridge_error_label(data)` returns the matching log label without exposing the payload.
 
 ### Send and reply
 

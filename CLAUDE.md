@@ -38,6 +38,9 @@ fbchat-v2/
 │   │   ├── _session.py
 │   │   ├── _storage.py
 │   │   ├── _utils.py
+│   │   ├── _console.py
+│   │   ├── _permissions.py
+│   │   ├── _types.py
 │   │   └── _facebookLogin.py
 │   ├── _features/
 │   │   ├── _facebook/
@@ -48,6 +51,7 @@ fbchat-v2/
 │       ├── _listening.py
 │       ├── _listening_e2ee.py
 │       ├── _bridge_actions.py
+│       ├── _bridge_checksums.py
 │       ├── _send_e2ee.py
 │       ├── _editMessage.py
 │       ├── _changeTheme.py
@@ -55,11 +59,14 @@ fbchat-v2/
 │       ├── _reactions.py
 │       ├── _unsend.py
 │       └── _message_requests.py
+│   └── fbchat_v2/          # bản sinh từ _core/_features/_messaging, không sửa tay
 ├── bridge-e2ee/
 │   ├── main.go
 │   ├── bridge/
 │   ├── meta/
 │   └── go.mod
+├── deploy/                 # fb-bot của fork (Docker, nhiều tài khoản), xem deploy/README.md
+├── scripts/                # sync_canonical_package.py, release, canary/soak
 ├── tests/
 ├── README.md
 ├── README_EN.md
@@ -67,6 +74,10 @@ fbchat-v2/
 ├── FLOWCHART.md
 └── pyproject.toml
 ```
+
+`src/fbchat_v2/` là package canonical được sinh lại từ `src/_core`, `src/_features`, `src/_messaging` (cả `.py` lẫn `README*.md`). Sửa ở `src/`, rồi chạy `.venv/bin/python scripts/sync_canonical_package.py` (cần Python 3.10 trở lên; `python3` của macOS là 3.9 nên lỗi); CI chạy `--check` và báo lỗi nếu bản sinh lệch.
+
+`AGENT_MEMORYs.md` là nhật ký của upstream; không ghi việc của fork vào đó (trạng thái fork ở `omnichannel/STATUS.md`).
 
 ## 🏗️ Kiến trúc 3 tầng
 
@@ -423,6 +434,7 @@ Bot mẫu hiện tại:
 - Bỏ self-message và dedupe message ID.
 - Reply E2EE nếu có `chatJid`; fallback thường nếu có `threadId`.
 - `/unsend` dùng `BridgeActions.unsend_e2ee_message`.
+- Log sự kiện `error` của bridge qua `bridge_error_label()`: không có `code` là socket rớt tạm, không phải lỗi.
 - Shutdown stop bridge và await task.
 
 Khi thêm command:
@@ -501,6 +513,7 @@ Khi đổi RPC:
 3. Cập nhật Python wrapper.
 4. Thêm Go test và Python mock test.
 5. Cập nhật bridge README và messaging docs.
+6. Chạy `.venv/bin/python scripts/sync_canonical_package.py` rồi `--check` để `src/fbchat_v2/` khớp với `src/`.
 
 ## 📚 Documentation surface
 
@@ -614,6 +627,10 @@ Edit/theme success chỉ xác nhận publish. Đừng đổi message thành “s
 
 Không replace Vietnamese chỉ vì `Get-Content` render sai. Verify bytes/codepoints trước.
 
+### Xoay User-Agent
+
+Không xoay User-Agent hay đổi `sec-ch-ua-platform` theo request: một phiên mang nhiều trình duyệt là dấu hiệu Facebook dùng để huỷ phiên. Mọi request dùng `BROWSER_USER_AGENT`, `BROWSER_SEC_CH_UA`, `BROWSER_PLATFORM` trong `_core._utils`; đổi phiên bản Chrome thì đổi cùng lúc với `bridge-e2ee/meta/pkg/messagix/useragent/useragent.go` (`tests/test_browser_identity.py` kiểm tra).
+
 ## ✅ Pre-commit checklist
 
 - [ ] Đúng tầng và không circular import.
@@ -625,6 +642,7 @@ Không replace Vietnamese chỉ vì `Get-Content` render sai. Verify bytes/codep
 - [ ] Test mới đã chạy.
 - [ ] Python compile/lint sạch.
 - [ ] Go test sạch nếu đụng bridge.
+- [ ] Đã chạy `scripts/sync_canonical_package.py` và `--check` sạch nếu đụng `src/_core`, `src/_features`, `src/_messaging`.
 - [ ] Tài liệu Việt và Anh đồng bộ.
 - [ ] Không mojibake/U+FFFD/NUL.
 - [ ] `git diff --check` sạch.

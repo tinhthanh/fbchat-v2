@@ -259,6 +259,10 @@ payload = await post_form_json_async(
 )
 ```
 
+### Danh tính trình duyệt
+
+Mọi request dùng một danh tính trình duyệt cố định (Linux, Chrome 141): `BROWSER_USER_AGENT`, `BROWSER_SEC_CH_UA` và `BROWSER_PLATFORM`, không xoay User-Agent. Giá trị này phải trùng với bridge E2EE (`bridge-e2ee/meta/pkg/messagix/useragent/useragent.go`), vì một phiên mang nhiều trình duyệt hoặc hệ điều hành dễ bị Facebook huỷ. Đổi phiên bản Chrome thì đổi cả hai nơi cùng lúc; `tests/test_browser_identity.py` báo lỗi khi hai bên lệch nhau.
+
 ### Form builder
 
 `formAll(dataFB, friendlyName, docID, requireGraphql=True)` thêm token session và metadata Facebook thường dùng. Với endpoint form không phải GraphQL, truyền `requireGraphql=False`.

@@ -533,7 +533,7 @@ Các loại event thường gặp:
 | `e2eeMessage` | Tin nhắn trực tiếp đã giải mã |
 | `reconnected` | Transport nối lại |
 | `disconnected` | Mất kết nối |
-| `error` | Lỗi bridge hoặc transport |
+| `error` | Lỗi bridge hoặc transport. Không có `code`: socket rớt tạm, bridge tự kết nối lại; `code` 1: lỗi kết nối vĩnh viễn; `code` 2: tin E2EE không giải mã được. `bridge_error_label(data)` trả nhãn log tương ứng mà không lộ payload |
 | `bridge_fatal` | Watchdog vượt giới hạn retry |
 
 ### Send text và reply

@@ -9,16 +9,15 @@ phiên bản tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
 ## [Unreleased]
 
-> Các thay đổi website dưới đây hiện chỉ nằm trong working copy `website/` đang
-> bị Git ignore; chúng chưa thuộc tag hoặc package phát hành nào.
-
 ### Added
 
 - Bridge RPC `getCookies` trả cookie hiện tại của phiên (messagix cập nhật từ
   Set-Cookie); Python `listeningE2EEEvent.get_cookies()` /
   `get_cookies_blocking()` (bridge cũ không có method thì trả `{}`).
-- Deploy: `session_keeper.py` lưu cookie Facebook cấp lại và mở trang chủ mỗi
-  ngày cùng danh tính trình duyệt, thay cho việc giữ trình duyệt mở để "giữ phiên".
+- Deploy (fb-bot của fork): xem [deploy/README.md](deploy/README.md).
+
+> Các thay đổi website dưới đây hiện chỉ nằm trong working copy `website/` đang
+> bị Git ignore; chúng chưa thuộc tag hoặc package phát hành nào.
 
 - Thêm `website/validate_i18n.py` để kiểm tra cấu trúc song ngữ, các cặp VI/EN,
   tab/panel, liên kết nội bộ và nội dung bị rò giữa hai locale.
@@ -42,6 +41,8 @@ phiên bản tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
   `undecryptable e2ee message`; chỉ code 1 hoặc mã lạ mới ghi `bridge error`.
   Helper mới `bridge_error_label()`. Payload vẫn ẩn trừ khi bật `debug_errors`.
 
+> Website (chỉ trong working copy `website/`, chưa phát hành):
+
 - Chuẩn hóa website thành giao diện VI/EN dùng chung DOM; metadata, ARIA,
   placeholder, tìm kiếm, nút sao chép và định dạng số đổi theo locale hiện tại.
 - Khôi phục lấy release và số sao theo thời gian thực từ GitHub API, chuẩn hóa
@@ -52,6 +53,8 @@ phiên bản tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
   thống nhất.
 
 ### Fixed
+
+> Website (chỉ trong working copy `website/`, chưa phát hành):
 
 - Sửa language/theme toggle, version và star counter bị vô hiệu do literal
   newline, phần tử locale bị ẩn hoặc skeleton không được gỡ.
