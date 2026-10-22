@@ -140,6 +140,8 @@ Browser sign-in uses the `fb-login-ui` service (`login/` image, `control.py` com
 
 ## 🔄 Syncing with upstream
 
+The shared process for every fork in the omnichannel system (separate branch, checks, canary, re-pinning, known traps): `omnichannel/docs/UPSTREAM.md`.
+
 The `upstream` remote points to the original repository and `origin` to the fork:
 
 ```bash

@@ -140,6 +140,8 @@ Tên/ảnh của chính tài khoản lấy từ `/chat/user_info`; một số t�
 
 ## 🔄 Đồng bộ với upstream
 
+Quy trình chung cho mọi fork của hệ thống omnichannel (nhánh riêng, kiểm tra, canary, ghim lại, bẫy đã gặp): `omnichannel/docs/UPSTREAM.md`.
+
 Remote `upstream` trỏ tới repo gốc, `origin` trỏ tới fork:
 
 ```bash
