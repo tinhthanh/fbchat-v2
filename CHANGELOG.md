@@ -54,6 +54,12 @@ phiên bản tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
 ### Fixed
 
+- Bridge yêu cầu Go 1.26.10 (`go.mod`): vá GO-2026-6809 trong `crypto/x509`
+  mà govulncheck tìm thấy trên đường tải media.
+- Test danh tính trình duyệt không còn hỏng CI khi job Python không có
+  submodule `bridge-e2ee/meta`: job Go kiểm tra cùng điều kiện
+  (`bridge-e2ee/identity_test.go`), test Python bỏ qua khi thiếu submodule.
+
 > Website (chỉ trong working copy `website/`, chưa phát hành):
 
 - Sửa language/theme toggle, version và star counter bị vô hiệu do literal

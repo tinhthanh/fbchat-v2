@@ -9,6 +9,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 from _core import _utils
 from _core._session import _build_home_request
 
@@ -24,6 +26,10 @@ def _go_const(name: str) -> str:
     return match.group(1)
 
 
+@pytest.mark.skipif(
+    not USERAGENT_GO.exists(),
+    reason="cần submodule bridge-e2ee/meta; job Go kiểm tra cùng điều này (identity_test.go)",
+)
 def test_python_identity_matches_bridge() -> None:
     version = _go_const("ChromeVersion")
     assert _utils.BROWSER_CHROME_VERSION == version
