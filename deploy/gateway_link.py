@@ -376,7 +376,12 @@ def media_rpc(
         if mime.startswith("audio/"):
             # ptt: gửi thành tin thoại (bấm nghe trong chat), không phải tệp audio.
             seconds = audio_seconds(base64.b64decode(data or b""), mime)
-            return "sendE2EEAudio", {**common, "duration": seconds, "ptt": True, **reply}
+            return "sendE2EEAudio", {
+                **common,
+                "duration": seconds,
+                "ptt": True,
+                **reply,
+            }
         return "sendE2EEDocument", {**common, "filename": name, **reply}
     thread = {
         "threadId": int(target),
@@ -1195,7 +1200,10 @@ class GatewayLink:
         except Exception as error:  # bridge/Facebook từ chối
             self.log("gateway", f"❌ Thả cảm xúc thất bại: {error}")
             return 502, f"Facebook không thả được cảm xúc: {error}"
-        self.log("gateway", "Nhân viên đã thả cảm xúc." if emoji else "Nhân viên đã bỏ cảm xúc.")
+        self.log(
+            "gateway",
+            "Nhân viên đã thả cảm xúc." if emoji else "Nhân viên đã bỏ cảm xúc.",
+        )
         return 200, json.dumps({"ok": True})
 
     def _after_send(

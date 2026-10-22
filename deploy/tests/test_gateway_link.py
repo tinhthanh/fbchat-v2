@@ -225,7 +225,12 @@ async def test_http_server_requires_token_and_sends() -> None:
             )
             react = await client.post(
                 "/react",
-                json={"account": "acc1", "thread_id": "thread:9", "message_id": "m1", "emoji": "👍"},
+                json={
+                    "account": "acc1",
+                    "thread_id": "thread:9",
+                    "message_id": "m1",
+                    "emoji": "👍",
+                },
                 headers={"Authorization": f"Bearer {TOKEN}"},
             )
     finally:
@@ -1171,7 +1176,10 @@ async def test_reaction_removal_and_owner_reaction_carry_badge_fields(
     ):
         await link.handle_meta("acc1", bot, {"type": "e2eeReaction", "data": data})
     events = [c[1] for c in calls if c[0] == "/v1/event"]
-    assert [(e["reaction"], e["reactor_id"]) for e in events] == [("", "7"), ("😆", "self")]
+    assert [(e["reaction"], e["reactor_id"]) for e in events] == [
+        ("", "7"),
+        ("😆", "self"),
+    ]
     assert events[0]["text"].startswith("(bỏ cảm xúc)")
 
 
@@ -1186,20 +1194,49 @@ async def test_agent_reaction_goes_through_the_bridge(
     await link.forward(
         "acc1",
         bot,
-        {"messageID": "m1", "userID": "7", "body": "hi", "chatJid": "7@msgr", "senderJid": "7.0@msgr"},
+        {
+            "messageID": "m1",
+            "userID": "7",
+            "body": "hi",
+            "chatJid": "7@msgr",
+            "senderJid": "7.0@msgr",
+        },
     )
     bridge = bot.listener._bridge
-    ok = await link.react({"account": "acc1", "thread_id": "e2ee:7@msgr", "message_id": "m1", "emoji": "❤️"})
-    gone = await link.react({"account": "acc1", "thread_id": "thread:55", "message_id": "m9", "emoji": ""})
+    ok = await link.react(
+        {
+            "account": "acc1",
+            "thread_id": "e2ee:7@msgr",
+            "message_id": "m1",
+            "emoji": "❤️",
+        }
+    )
+    gone = await link.react(
+        {"account": "acc1", "thread_id": "thread:55", "message_id": "m9", "emoji": ""}
+    )
     assert ok[0] == 200 and gone[0] == 200
     assert bridge.calls[-2] == (
         "sendE2EEReaction",
         {"chatJid": "7@msgr", "messageId": "m1", "senderJid": "7.0@msgr", "emoji": "❤"},
     )
-    assert bridge.calls[-1] == ("sendReaction", {"threadId": 55, "messageId": "m9", "emoji": ""})
-    bad = await link.react({"account": "acc1", "thread_id": "x", "message_id": "m1", "emoji": "❤"})
+    assert bridge.calls[-1] == (
+        "sendReaction",
+        {"threadId": 55, "messageId": "m9", "emoji": ""},
+    )
+    bad = await link.react(
+        {"account": "acc1", "thread_id": "x", "message_id": "m1", "emoji": "❤"}
+    )
     assert bad[0] == 400
-    assert (await link.react({"account": "nope", "thread_id": "e2ee:7@msgr", "message_id": "m1", "emoji": "❤"}))[0] == 404
+    assert (
+        await link.react(
+            {
+                "account": "nope",
+                "thread_id": "e2ee:7@msgr",
+                "message_id": "m1",
+                "emoji": "❤",
+            }
+        )
+    )[0] == 404
 
 
 def _box(kind: bytes, body: bytes) -> bytes:
@@ -1207,15 +1244,29 @@ def _box(kind: bytes, body: bytes) -> bytes:
 
 
 def test_audio_seconds_reads_mp4_and_ogg() -> None:
-    mvhd0 = _box(b"mvhd", bytes(4) + bytes(8) + (1000).to_bytes(4, "big") + (2500).to_bytes(4, "big"))
+    mvhd0 = _box(
+        b"mvhd",
+        bytes(4) + bytes(8) + (1000).to_bytes(4, "big") + (2500).to_bytes(4, "big"),
+    )
     mp4 = _box(b"ftyp", b"M4A " + bytes(4)) + _box(b"moov", mvhd0)
     assert audio_seconds(mp4, "audio/mp4") == 3  # 2,5 giây làm tròn lên
-    mvhd1 = _box(b"mvhd", b"\x01" + bytes(3) + bytes(16) + (600).to_bytes(4, "big") + (6000).to_bytes(8, "big"))
+    mvhd1 = _box(
+        b"mvhd",
+        b"\x01"
+        + bytes(3)
+        + bytes(16)
+        + (600).to_bytes(4, "big")
+        + (6000).to_bytes(8, "big"),
+    )
     assert audio_seconds(_box(b"moov", mvhd1), "audio/mp4") == 10
     page = b"OggS" + bytes(2) + (48000 * 4).to_bytes(8, "little") + bytes(10)
     assert audio_seconds(b"OggS" + bytes(30) + page, "audio/ogg; codecs=opus") == 4
     assert audio_seconds("rác".encode(), "audio/mp4") == 0
     assert audio_seconds(b"", "audio/ogg") == 0
     b64 = base64.b64encode(mp4).decode()
-    method, params = media_rpc("e2ee", "8@msgr", {"name": "a.m4a", "content_type": "audio/mp4", "data": b64})
-    assert method == "sendE2EEAudio" and params["ptt"] is True and params["duration"] == 3
+    method, params = media_rpc(
+        "e2ee", "8@msgr", {"name": "a.m4a", "content_type": "audio/mp4", "data": b64}
+    )
+    assert (
+        method == "sendE2EEAudio" and params["ptt"] is True and params["duration"] == 3
+    )
