@@ -1,5 +1,153 @@
 # Agent Memories
 
+## 2026-10-21 — Chuẩn bị phát hành reconnect 2.3.4
+
+### Mục tiêu
+- Đồng bộ checkout `fbchat-v2-pypi`, commit/push nhánh `pypi`, rồi phát hành
+  GitHub `v2.3.4` và PyPI `2.3.4` theo yêu cầu m008v; không mở live Facebook.
+
+### Đã thực hiện
+- Nâng version runtime, bridge, metadata, verifier và fixture đang hoạt động
+  lên 2.3.4; thêm changelog/release note, sửa docs Việt/Anh và canonical snapshot.
+- Workflow tạo GitHub Release dạng draft và dùng tên đúng tag. Sau khi workflow
+  đạt, tải/xác minh chín asset, đồng bộ source cùng checksum từ verified sdist
+  vào nhánh `pypi`, rồi mới public draft và upload nguyên wheel/sdist đó lên PyPI.
+- Không merge lịch sử độc lập main/pypi, không copy checksum placeholder từ
+  main sang checkout đóng gói, không thay tag/artifact 2.3.3 đã phát hành.
+
+### Kiểm tra
+- Full suite 530/530 offline đạt; targeted release/canonical/lifecycle 87/87
+  đạt. Helper chặn DNS/TCP ngoài loopback, không dùng cookie hoặc device thật.
+- Ruff, Black 133 file, mypy source 52 file/canonical 46 file và compileall đạt.
+- Go 1.26.10 full test/vet, native Windows build/RPC smoke 2.3.4 offline đạt.
+- Bản source reconnect `b8350d9` trước bump có CI 12/12 đạt, gồm vulnerability
+  scan và Linux race. Release 2.3.4 vẫn cần lượt CI/artifact riêng sau tag.
+
+### Kết quả phát hành
+- Tag v2.3.4 giữ nguyên source aa7abd0386ef1d4cabf8ce592d0f2cf308d8f4f6;
+  Release run 39622736668 thành công, draft 419703838 có đúng chín asset.
+- Tải lại cả chín file, kiểm API digest, hai manifest, embedded checksum,
+  Twine strict, fresh wheel install và native Windows RPC smoke đều đạt.
+- Đồng bộ 55 canonical file cùng ba root docs vào checkout pypi; QA độc lập
+  xác nhận 58/58 file khớp byte. Bảy package test, Ruff, mypy/Black 46 file,
+  compileall và local build đạt; từng member wheel local giống production.
+- Commit 1ba974de8aa52b188e949eeef3227b53af4bc1ff đã push origin/pypi trước
+  khi public GitHub Release https://github.com/m008v/fbchat-v2/releases/tag/v2.3.4.
+- Upload nguyên wheel/sdist GitHub bằng Twine 7/Windows keyring; không đọc/in
+  token bằng tool, không dùng local rebuild để publish. PyPI public 2.3.4 có
+  đúng hai file không yanked, tải lại byte-identical với GitHub:
+  wheel 9237b68fc99483100f543da6c6327581b7432630124f95e2fd0b85a73cc21536;
+  sdist 43498ffc92c151de60f7a20467d6b046fdcfb581b55396a6545aba6b4927c690.
+- Fresh install trực tiếp pypi.org/simple vào venv mới đạt dependency check
+  13 package, archive verifier, version/export/retry-policy và năm bridge hash.
+- Mọi version thay đổi trong lượt này đều 2.3.4; không di chuyển tag 2.3.3,
+  không merge/force branch hoặc mở Facebook/Messenger live.
+
+### Việc còn lại
+- Giữ `.vs/` và mọi artifact/toolenv ngoài commit; live cold restart/network
+  vẫn chưa kiểm, không lấy offline test làm bằng chứng provider-live.
+
+## 2026-10-21 — Tự reconnect MQTT/E2EE và kiểm thử offline
+
+### Mục tiêu
+- Triển khai năm nhóm cải tiến reconnect, chỉ test offline, commit/push main.
+  Không mở live, tạo tag, publish PyPI hoặc phát hành; giữ version 2.3.3.
+
+### Đã thực hiện
+- Thêm `ReconnectPolicy`, `ConnectionFailure` và snapshot/callback trạng thái
+  dùng chung; retry startup/runtime có exponential backoff, jitter, delay trần
+  và budget tùy chọn. Lỗi auth/checkpoint/config/protocol dừng thay vì retry.
+- MQTT dùng một supervisor thay cho hai vòng retry cạnh tranh; giữ sequence,
+  sync token, bounded message-ID dedupe và cleanup worker khi cancel nhiều lần.
+- E2EE ưu tiên native socket reconnect khi RPC còn khỏe. Chỉ thay process khi
+  generation không còn dùng được; replay startup không replay send/mutation.
+- Thêm Go capability `structuredConnectionStatus`, failure code an toàn và
+  trạng thái riêng từng transport. Permanent failure không bị event disconnect
+  tiếp theo che mất; phân loại typed TLS/x509 trước lỗi mạng chung.
+- Process E2EE memory-only mất thì báo `device_state_lost`, không tự pair hoặc
+  ghi key ra đĩa. Persistent device là opt-in; thông báo nguy cơ message gap khi
+  thay process, không hứa nhận đủ tin hoặc exactly-once.
+- Bot mẫu tiếp tục chờ khi startup đang reconnecting. Đồng bộ namespace
+  canonical, export API mới, cập nhật docs Việt/Anh và native RPC smoke contract.
+  Ignore `/.state/` và cảnh báo không commit/share device/session keys.
+
+### Quyết định kỹ thuật
+- Mặc định wrapper retry lỗi mạng không giới hạn, reset budget sau 60 giây ổn
+  định. MQTT đếm connect retry; E2EE đếm retry từng phase startup/respawn, còn
+  native recovery đếm lần wrapper quan sát, không phải TCP attempt của Go.
+- `max_delay` không ghi đè backoff socket Go; regular native trần 5 phút.
+  Budget hữu hạn có thể hết trước lần thử socket tiếp theo.
+- Unknown failure dừng fail-closed. Paho không giữ HTTP status của WebSocket
+  upgrade rejection nên không đoán đây là network/auth từ handshake chung.
+- Python duyệt cause chain trước generic network fallback: HTTPX/OSError bọc
+  lỗi chứng chỉ TLS vẫn được phân loại configuration, không retry vô hạn.
+- CI SHA `494bf7f` đạt 11/12 job; Go test/vet đạt nhưng vulnerability scan chặn
+  `GO-2026-6809` / `CVE-2026-111943` trong `crypto/x509.Certificate.Verify`.
+  Advisory chính thức công bố 21/10 yêu cầu Go >= 1.26.10; nâng go.mod và docs
+  hiện hành đúng patch 1.26.10, không đổi dependency ứng dụng hay gate bảo mật.
+- Source main cần bridge build cùng source; binary release 2.3.3 thiếu capability
+  mới và bị từ chối rõ ràng. Không thay tag/artifact đã phát hành.
+
+### Kiểm tra
+- Full pytest cuối: 530/530 đạt, chạy qua helper chặn DNS/TCP ngoài loopback; không
+  dùng cookie/device hoặc listener thật. E2EE/lifecycle riêng 69/69 đạt.
+- Ruff, Black 133 file, compileall, canonical snapshot check và mypy default/
+  Linux (52 file) cùng canonical namespace (46 file) đạt.
+- Go full test và vet đạt với Go 1.26.9 cache, `GOTOOLCHAIN=local`,
+  `GOPROXY=off`, `GOSUMDB=off`. Test TEMP/TMP trỏ workspace ignored để tránh
+  sandbox ACL/atomic-rename failure ở Temp mặc định. Local race chưa chạy vì
+  CGO tắt; CI Linux vẫn là gate riêng.
+- Native Windows build/RPC smoke không credential đạt. Hatchling build wheel/
+  sdist, Twine strict, fresh install từ cả hai bằng cache offline, verifier và
+  public reconnect imports đạt. Không upload package.
+- Sau bản vá toolchain: Go 1.26.10 full test/vet và native build/RPC smoke đạt
+  offline; build/verifier/Twine package cùng UTF-8/mojibake scan 36 file đạt.
+- Full suite không tái hiện flaky pipe-write timing cũ; một lượt agent trước
+  đó lỗi timing, chạy riêng và full suite hiện tại đều đạt.
+- UTF-8 strict, mojibake/secret marker scan 35 file task-owned và diff check
+  đạt; không đưa credential, device state hoặc output test vào Git.
+
+### Việc còn lại
+- Live cold restart sau payload thật và mất mạng riêng bridge vẫn chưa được
+  kiểm; cần m008v cho phép lại. Offline không thay thế bằng chứng provider-live.
+- CI hosted/race và remote push được kiểm riêng sau commit; không suy diễn từ
+  kết quả local. Giữ `.vs/` cùng các file tạm ngoài commit.
+
+## 2026-10-21 — Kiểm tra yêu cầu tự reconnect MQTT/E2EE
+
+### Mục tiêu
+- Kiểm tra cơ chế hiện có và đề xuất hướng bổ sung theo yêu cầu tư vấn của
+  m008v; chưa triển khai, mở live hoặc phát hành bản mới.
+
+### Đã phân tích
+- MQTT đã dùng Paho auto-reconnect với delay 1–30 giây và vòng tạo client mới
+  cho lỗi sync queue. Tuy nhiên `connect_mqtt_blocking()` gọi `connect()` trực
+  tiếp trước `loop_forever()`: lỗi mạng ở lần đầu thoát ra ngoài vòng retry.
+- E2EE đã có health check và watchdog respawn/replay sau khi startup thành
+  công; giới hạn năm lần, reset budget sau 60 giây ổn định. Startup thất bại
+  đóng listener; hết budget phát `bridge_fatal`, không đợi mạng vô hạn.
+- Listener E2EE mặc định `e2ee_memory_only=True`; Go tạo device store mới khi
+  respawn ở chế độ này. Reconnect socket và thay process không tương đương
+  về identity; không tự đổi chính sách lưu key của người dùng để che vấn đề.
+- Graph cấu trúc dự án thuộc commit cũ `470e805`, chỉ dùng định vị module;
+  các kết luận trên đã đối chiếu source hiện tại và Paho đang cài.
+
+### Kiểm tra
+- Probe hoàn toàn mock: lần connect đầu phát `OSError`, đúng một connect và
+  không gọi `loop_forever`; không có request mạng hoặc credential thật.
+- Bảy test sẵn có về queue/sequence, retry budget, stop trong backoff,
+  startup fail-closed và chờ reconnect đều đạt; 92 test không được chọn.
+- Không sửa runtime/test, không đăng nhập hoặc chạy listener thật.
+
+### Hướng đề xuất
+- Bổ sung retry startup và policy backoff có jitter, delay trần và giới hạn
+  tùy chọn; phân biệt lỗi mạng tạm thời với lỗi auth/protocol/config.
+- Ưu tiên socket reconnect, giữ device/session, không để hai cơ chế phục hồi
+  cạnh tranh. Stop phải ngắt chờ; không tự gửi lại mutation có kết quả unknown.
+- Test outage dài, startup offline, E2EE rớt riêng, stop và tin trùng/mất ở
+  offline trước; live cold restart/network vẫn cần m008v cho phép riêng.
+- Chưa sửa code, commit/push, thay tag hoặc publish; giữ artifact 2.3.3.
+
 ## 2026-10-16 — Biên tập tài liệu Việt/Anh và chuẩn bị phát hành 2.3.3
 
 ### Mục tiêu

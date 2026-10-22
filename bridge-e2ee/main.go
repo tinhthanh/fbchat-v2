@@ -46,10 +46,12 @@ type request struct {
 }
 
 type response struct {
-	ID    uint64      `json:"id"`
-	OK    bool        `json:"ok"`
-	Data  interface{} `json:"data,omitempty"`
-	Error string      `json:"error,omitempty"`
+	ID        uint64      `json:"id"`
+	OK        bool        `json:"ok"`
+	Data      interface{} `json:"data,omitempty"`
+	Error     string      `json:"error,omitempty"`
+	ErrorCode string      `json:"errorCode,omitempty"`
+	Retryable *bool       `json:"retryable,omitempty"`
 }
 
 type eventEnvelope struct {
@@ -62,7 +64,7 @@ const maxRPCRequestBytes = 150 * 1024 * 1024
 
 // bridgeVersion is intentionally overridable with -ldflags
 // "-X main.bridgeVersion=<version>" for release builds.
-var bridgeVersion = "2.3.3"
+var bridgeVersion = "2.3.4"
 
 var bridgeCapabilities = []string{
 	"newClient",
@@ -70,6 +72,7 @@ var bridgeCapabilities = []string{
 	"connectE2EE",
 	"isConnected",
 	"events",
+	"structuredConnectionStatus",
 	"getCookies",
 }
 
@@ -90,8 +93,41 @@ func ok(id uint64, data interface{}) {
 	writeJSON(response{ID: id, OK: true, Data: data})
 }
 
+func failureResponse(id uint64, err error) response {
+	resp := response{ID: id, OK: false, Error: err.Error()}
+	classification := bridge.ClassifyConnectionError(err)
+	if classification.Classified {
+		retryable := classification.Retryable
+		resp.ErrorCode = string(classification.Code)
+		resp.Retryable = &retryable
+	}
+	return resp
+}
+
 func fail(id uint64, err error) {
-	writeJSON(response{ID: id, OK: false, Error: err.Error()})
+	writeJSON(failureResponse(id, err))
+}
+
+func connectionPayload(c *bridge.Client) map[string]interface{} {
+	payload := map[string]interface{}{
+		"connected":          false,
+		"e2eeConnected":      false,
+		"nativeReconnecting": false,
+	}
+	if c == nil {
+		return payload
+	}
+	payload["connected"] = c.IsConnected()
+	payload["e2eeConnected"] = c.IsE2EEConnected()
+	status := c.ConnectionStatus()
+	payload["nativeReconnecting"] = status.NativeReconnecting
+	if status.HasFailure {
+		payload["failureCode"] = status.FailureCode
+		payload["retryable"] = status.Retryable
+		payload["permanent"] = status.Permanent
+		payload["failureTransport"] = status.FailureTransport
+	}
+	return payload
 }
 
 func helloPayload() map[string]interface{} {
@@ -162,14 +198,7 @@ func handle(req *request) {
 		ok(req.ID, map[string]interface{}{})
 
 	case "isConnected":
-		if client == nil {
-			ok(req.ID, map[string]interface{}{"connected": false, "e2eeConnected": false})
-			return
-		}
-		ok(req.ID, map[string]interface{}{
-			"connected":     client.IsConnected(),
-			"e2eeConnected": client.IsE2EEConnected(),
-		})
+		ok(req.ID, connectionPayload(client))
 
 	case "getCookies":
 		// Cookie hiện tại của phiên (messagix cập nhật từ Set-Cookie của Facebook)
