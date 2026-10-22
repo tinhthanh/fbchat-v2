@@ -476,3 +476,46 @@ async def test_offline_account_keeps_retrying_until_network_returns(
     )
     assert ok is True and calls["n"] == 8
     assert multi_main._account_states["offline"] == "running"
+
+
+@pytest.mark.asyncio
+async def test_on_ready_waits_while_library_reconnects(
+    mock_dataFB: dict[str, Any], fake_listener: _FakeListener
+) -> None:
+    # Từ 2.3.4: khởi động lúc mất mạng thì listener tự nối lại thay vì ném lỗi.
+    answers = iter([False, False, True])
+    fake_listener.connection_state = "reconnecting"  # type: ignore[attr-defined]
+    fake_listener.wait_until_connected = (  # type: ignore[method-assign]
+        lambda timeout, *, require_e2ee: next(answers)
+    )
+    bot = multi_main.AccountBot(mock_dataFB, account="acc1", device_path="/d.json")
+    ready = asyncio.Event()
+
+    await multi_main._notify_when_ready(bot, ready.set)
+
+    assert ready.is_set()
+
+
+@pytest.mark.asyncio
+async def test_library_reconnect_status_moves_account_state(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    mock_dataFB: dict[str, Any],
+    fake_listener: _FakeListener,
+) -> None:
+    health = tmp_path / "health.json"
+    monkeypatch.setattr(multi_main, "HEALTH_FILE", str(health))
+    monkeypatch.setattr(multi_main, "_account_states", {"acc1": "running"})
+    monkeypatch.setattr(multi_main, "_account_history", {})
+    bot = multi_main.AccountBot(mock_dataFB, account="acc1", device_path="/d.json")
+    bot._loop = asyncio.get_running_loop()
+
+    bot._log_connection_status({"state": "reconnecting", "reason": "network"})
+    await asyncio.sleep(0)
+    assert json.loads(health.read_text()) == {"acc1": "retrying"}
+
+    bot._log_connection_status({"state": "connected"})
+    await asyncio.sleep(0)
+    assert json.loads(health.read_text()) == {"acc1": "running"}
+    kinds = [item["kind"] for item in multi_main.account_history("acc1").items]
+    assert kinds[-2:] == ["network", "connected"]

@@ -53,6 +53,7 @@ FORCE_LOGIN=1 ACCOUNT=acc2 docker compose run --rm --service-ports login  # đă
 - Mọi tài khoản dùng chung một tiến trình Python, event loop và `httpx.AsyncClient`. Mỗi tài khoản vẫn có một tiến trình bridge Go riêng vì bridge chỉ hỗ trợ một client.
 - Log có nhãn tài khoản, ví dụ `[acc2] [bot] ...`. Dòng log của chính bridge chưa có nhãn.
 - Tài khoản lỗi được thử lại với backoff (30 giây, nhân đôi) mà không làm dừng tài khoản khác. Chỉ **phiên hết hạn thật** (vẫn tới được Facebook nhưng cookie không còn cho ra dataFB) mới dừng sau 2 lần; mất mạng, lỗi bridge… thì thử lại mãi, tối đa mỗi 2 phút, để có mạng lại là tự kết nối. `dataGetHome` trả `None` cả khi mất mạng, nên bot thử tải `facebook.com/robots.txt` (không cookie) để phân biệt. Bộ đếm reset nếu lần chạy trước kéo dài từ 10 phút trở lên.
+- Từ fbchat-v2 2.3.4 thư viện tự nối lại khi mất mạng (cả lúc khởi động) thay vì ném lỗi: bot nhận trạng thái `reconnecting` của thư viện để chuyển tài khoản sang `retrying` (ghi lịch sử "Mất kết nối, thư viện đang tự nối lại"), và về `running` khi thư viện báo `connected`. Lỗi xác thực vẫn dừng listener và đi qua vòng thử lại ở trên.
 - Tên tài khoản chỉ gồm chữ, số, `_`, `.`, `-` (tối đa 64 ký tự, bắt đầu bằng chữ hoặc số). Xóa tài khoản: dừng bot, xóa `/data/accounts/<tên>` trong volume rồi khởi động lại.
 
 ## 🩺 Healthcheck và restart

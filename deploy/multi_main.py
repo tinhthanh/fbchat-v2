@@ -187,6 +187,34 @@ class AccountBot(SimpleBot):
         # tin đến hay báo "could not be decrypted". Lưu ra file (0600) theo tài khoản.
         self.listener.device_path = device_path
         self.listener.e2ee_memory_only = not E2EE_PERSIST
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._reconnecting = False
+
+    async def run(self) -> None:
+        self._loop = asyncio.get_running_loop()
+        await super().run()
+
+    def _log_connection_status(self, status: dict[str, Any]) -> None:
+        """Trạng thái kết nối của thư viện (từ 2.3.4 tự nối lại; gọi từ listener thread)."""
+        super()._log_connection_status(status)
+        if self._loop is not None:
+            with contextlib.suppress(RuntimeError):  # loop đã đóng khi đang tắt
+                self._loop.call_soon_threadsafe(self._apply_connection_status, status)
+
+    def _apply_connection_status(self, status: dict[str, Any]) -> None:
+        # Thư viện tự nối lại thay vì ném lỗi, nên tài khoản phải tự chuyển
+        # retrying/running ở đây; lỗi xác thực vẫn làm listener dừng và đi qua
+        # supervise_account như trước.
+        state = status.get("state")
+        if state == "reconnecting" and not self._reconnecting:
+            self._reconnecting = True
+            set_account_state(self.account, "retrying")
+            account_history(self.account).record(
+                "network", "Mất kết nối, thư viện đang tự nối lại"
+            )
+        elif state == "connected" and self._reconnecting:
+            self._reconnecting = False
+            _mark_running(self.account)
 
     async def _dispatch(self, message: dict[str, Any]) -> None:
         if _gateway is not None:
@@ -386,13 +414,18 @@ async def _notify_when_ready(
     """Chờ cùng điều kiện ready với SimpleBot.run() rồi báo cho supervisor."""
     if on_ready is None:
         return
-    ready = await asyncio.to_thread(
-        bot.listener.wait_until_connected,
-        bot.listener.startup_timeout,
-        require_e2ee=True,
-    )
-    if ready:
-        on_ready()
+    while True:
+        ready = await asyncio.to_thread(
+            bot.listener.wait_until_connected,
+            bot.listener.startup_timeout,
+            require_e2ee=True,
+        )
+        if ready:
+            on_ready()
+            return
+        # Từ 2.3.4 listener tự nối lại khi khởi động lúc mất mạng: chờ tiếp.
+        if getattr(bot.listener, "connection_state", None) != "reconnecting":
+            return
 
 
 async def supervise_account(
