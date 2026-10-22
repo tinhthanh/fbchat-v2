@@ -2,6 +2,18 @@
 
 File này cung cấp context triển khai. Tài liệu cho người dùng nằm ở `README.md`, `README_EN.md` và `DOCS.md`.
 
+## 🧭 Workspace omnichannel
+
+Thư mục này còn chứa hệ thống inbox omnichannel dùng thư viện này. Ba thư mục con là repo riêng, không thuộc repo fbchat-v2:
+
+- `omnichannel/`: gateway, bot Fanpage và Zalo OA, compose, canary.
+- `zca-js/`: Zalo, có zalo-bot ở `deploy/`.
+- `libredesk/`: fork giao diện.
+
+`deploy/` của repo này là **fb-bot**, kênh Facebook của hệ thống đó.
+
+Làm việc với omnichannel, fb-bot hay bất kỳ kênh nào thì **đọc `omnichannel/CLAUDE.md` trước**. File đó có bản đồ repo, quy tắc an toàn (tài khoản thật/thử, không mở thêm phiên Facebook, tunnel chỉ mở webhook) và trạng thái hiện tại (`omnichannel/STATUS.md`).
+
 ## 📌 Tóm tắt bắt buộc
 
 - Repository dùng kiến trúc 3 tầng: `_core`, `_features`, `_messaging`.
