@@ -40,8 +40,9 @@ ENV PYTHONUNBUFFERED=1 \
     FBCHAT_ACCOUNTS_DIR=/data/accounts \
     FBCHAT_HEALTH_FILE=/tmp/fbchat-health.json
 
-# Healthy chỉ khi mọi tài khoản đã sẵn sàng E2EE ("running").
+# Healthy khi mọi tài khoản đã sẵn sàng E2EE ("running"). Có GATEWAY_URL thì chưa có
+# tài khoản vẫn healthy: tài khoản đầu tiên được thêm từ trang "Tài khoản kênh".
 HEALTHCHECK --interval=60s --timeout=5s --start-period=180s --retries=2 \
-    CMD ["python", "-c", "import json,os,sys; s=json.load(open(os.environ['FBCHAT_HEALTH_FILE'])); sys.exit(0 if s and all(v == 'running' for v in s.values()) else 1)"]
+    CMD ["python", "-c", "import json,os,sys; s=json.load(open(os.environ['FBCHAT_HEALTH_FILE'])); sys.exit(0 if (s or os.environ.get('GATEWAY_URL')) and all(v == 'running' for v in s.values()) else 1)"]
 
-ENTRYPOINT ["/sbin/tini", "--", "sh", "-c", "ls /data/accounts/*/config.json >/dev/null 2>&1 || { echo 'Chưa có tài khoản trong /data/accounts - chạy dịch vụ login trước.' >&2; exit 1; }; exec python /app/src/multi_main.py"]
+ENTRYPOINT ["/sbin/tini", "--", "sh", "-c", "[ -n \"$GATEWAY_URL\" ] || ls /data/accounts/*/config.json >/dev/null 2>&1 || { echo 'Chưa có tài khoản trong /data/accounts - chạy dịch vụ login trước.' >&2; exit 1; }; exec python /app/src/multi_main.py"]
