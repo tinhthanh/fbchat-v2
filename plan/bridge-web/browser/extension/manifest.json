@@ -11,18 +11,50 @@
     "http://127.0.0.1/*",
     "http://localhost/*"
   ],
-  "background": { "service_worker": "sw.js" },
+  "background": {
+    "service_worker": "sw.js"
+  },
   "content_scripts": [
     {
-      "matches": ["https://business.facebook.com/latest/inbox/*"],
-      "js": ["bs-inbox-listener.js"],
+      "matches": [
+        "https://business.facebook.com/latest/inbox/*"
+      ],
+      "js": [
+        "quiet.js"
+      ],
       "run_at": "document_start",
       "world": "MAIN"
     },
     {
-      "matches": ["https://business.facebook.com/latest/inbox/*"],
-      "js": ["relay.js"],
+      "matches": [
+        "https://business.facebook.com/latest/inbox/*"
+      ],
+      "js": [
+        "bs-inbox-listener.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://business.facebook.com/latest/inbox/*"
+      ],
+      "js": [
+        "relay.js"
+      ],
       "run_at": "document_start"
     }
-  ]
+  ],
+  "permissions": [
+    "declarativeNetRequest"
+  ],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "page_media",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
+  }
 }

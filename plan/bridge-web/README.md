@@ -29,27 +29,56 @@ Trang: `https://business.facebook.com/latest/inbox/all/?asset_id=<page id>`. `as
 
 ### Chạy bằng Docker trên Mac (khuyến nghị)
 
-`browser/` là image `fbweb-browser`: Chromium trên Alpine, mở Hộp thư Business Suite với extension tự viết nạp sẵn (không cần Tampermonkey), noVNC ở `127.0.0.1:6090` chỉ để đăng nhập và xem.
+`browser/` là image `fbweb-browser`: Chromium trên Alpine mở Hộp thư Business Suite với extension tự viết nạp sẵn (không cần Tampermonkey).
 
 ```bash
 cd plan/bridge-web/browser
-cp .env.example .env            # điền FBWEB_TOKEN (lệnh lấy token ghi trong file), quyền 600
-docker compose up -d --build
-open "http://localhost:6090/vnc.html?autoconnect=1&resize=scale"   # đăng nhập Facebook một lần
+cp .env.example .env                          # điền FBWEB_TOKEN (lệnh lấy token ghi trong file), quyền 600
+FBWEB_MODE=login docker compose up -d --build  # có noVNC để đăng nhập Facebook
+open "http://localhost:6090/vnc.html?autoconnect=1&resize=scale"
+docker compose up -d                          # đăng nhập xong: chế độ run (mặc định), không VNC
 ```
+
+| Chế độ | Chạy gì | Trang |
+|---|---|---|
+| `run` (mặc định) | Xvfb + openbox + Chromium | Chặn video và ảnh của trang; `quiet.js` tắt animation và báo trang đang ở nền |
+| `login` | thêm x11vnc + noVNC `127.0.0.1:6090` | Chỉ chặn video; giao diện bình thường để đăng nhập, xử lý checkpoint |
+
+Hai chế độ dùng chung profile trong volume `fbweb-browser_profile`; xoá volume là đăng xuất.
 
 | Phần | Vai trò |
 |---|---|
-| `extension/manifest.json` | MV3; `bs-inbox-listener.js` (chính file của bản Tampermonkey) chạy ở world `MAIN` từ `document_start` trên `/latest/inbox/*` |
-| `extension/relay.js` | Isolated world: nhận `postMessage` của script (`__bsInbox: "hello" | "event"`), chuyển cho service worker |
-| `extension/sw.js` | Tải file (cookie trình duyệt), `POST /ingest` với hàng đợi và gửi lại, `POST /heartbeat` mỗi lần trang báo "hello" (30 giây). Fetch của extension không bị CSP của trang chặn |
-| `entrypoint.sh` | Xvfb, openbox, x11vnc, websockify; ghi `config.json` (token) vào bản sao extension trong tmpfs; mở lại Chromium nếu tắt |
+| `extension/manifest.json` | MV3; `quiet.js` và `bs-inbox-listener.js` (chính file của bản Tampermonkey) ở world `MAIN`, `relay.js` ở isolated world, `document_start` trên `/latest/inbox/*` |
+| `extension/quiet.js`, `quiet-run.js` | Bản rỗng cho `login`; `run` dùng `quiet-run.js`: CSS `animation/transition: none`; `document.visibilityState = "hidden"`, `hasFocus() = false`; gỡ và chặn service worker của Facebook; thay web worker `webworker_v1` bằng worker giả |
+| `extension/rules.json` | `declarativeNetRequest` chặn `media` (và `image` ở `run`) do trang tự tải; yêu cầu của service worker không bị chặn |
+| `extension/relay.js` | Nhận `postMessage` của script (`__bsInbox: "hello" | "event"`), chuyển cho service worker |
+| `extension/sw.js` | Tải file (cookie trình duyệt), `POST /ingest` có hàng đợi và gửi lại, `POST /heartbeat` mỗi lần trang báo "hello" (30 giây). Fetch của extension không bị CSP của trang chặn |
+| `entrypoint.sh` | Xvfb, openbox, (x11vnc, websockify ở `login`); ghi `config.json` (token) và luật chặn vào bản sao extension trong tmpfs; watchdog; mở lại Chromium nếu tắt |
 
-- Profile nằm trong volume `fbweb-browser_profile`: khởi động lại không phải đăng nhập lại. Xoá volume là đăng xuất.
-- Container gọi `host.docker.internal:7008`, tức SSH tunnel của Mac tới server3.
-- Đo 31/10/2026: image 857 MB (gần hết là gói `chromium`), RAM khoảng 180 MiB, CPU dưới 1% lúc rảnh; giới hạn 1 GiB, 1 CPU. Cờ giảm tiến trình: `--no-zygote`, audio và network service chạy chung tiến trình, tắt crash reporter và back-forward cache, màn hình 1280x720. **Không** dùng `--in-process-gpu`: Chromium Alpine crash ngay (`Trace/breakpoint trap`).
-- Gỡ lỗi: `FBWEB_DEBUG=1 docker compose up -d` in console của trang (dòng `[BS-INBOX]`) ra `docker compose logs`. Console của service worker không ra log; xem phía bot bằng `docker compose logs fb-bridge-web` trên server3 (`ingest forwarded/skipped/rejected`).
-- Đây là một phiên Facebook riêng (trình duyệt Linux trên IP nhà), song song với Chrome thường và fb-bot trên server3.
+**Đo ngày 31/10/2026 (trang Business Suite còn sống, Trang VetGo):**
+
+| Cấu hình | CPU | RAM |
+|---|---|---|
+| Có giao diện, chưa tối ưu | 17-20%, **renderer crash sau 1-3 phút** | khoảng 400 MiB |
+| `--headless=new` | khoảng 45% (GPU process dựng khung liên tục; `--enable-begin-frame-control` không có tác dụng) | khoảng 500 MiB |
+| + chặn ảnh/video, `quiet.js` (animation, hidden) | khoảng 5% | 420-480 MiB |
+| + gỡ service worker của Facebook | khoảng 3-4% | khoảng 436 MiB |
+| + `--enable-low-end-device-mode`, `--max-semi-space-size=2` | khoảng 3-4% | khoảng 385 MiB |
+| **+ worker giả cho `webworker_v1`** (hiện tại) | **khoảng 1,5-3%** | **khoảng 388 MiB** (renderer trang khoảng 250 MiB, Chromium khoảng 110-170 MiB, Xvfb khoảng 40 MiB) |
+
+Bài học khi đo:
+- **Renderer crash khi giải mã H.264** (dump có `av:h264`, `subresource_url` là `.mp4` của fbcdn, vd. GIF Facebook đổi thành mp4) trên Chromium Alpine. Vì vậy trang không được tải video. Số "180 MiB, 0% CPU" đo trước khi biết là của một tab đã chết; kiểm tra luôn có renderer của trang (không có `--extension-process`) trước khi tin số đo.
+- `--in-process-gpu` làm Chromium crash ngay. `--no-zygote` không phải nguyên nhân crash nhưng đã bỏ cho an toàn.
+- Openbox thu nhỏ cửa sổ (`<iconic>`) không làm trang thành `hidden`; phải giả `visibilityState` trong trang.
+- Đo trang bằng CDP (`Performance.getMetrics` và CPU profile 15 giây): JS của trang rảnh khoảng 90%, JS heap chỉ khoảng 72 MiB. CPU còn lại là service worker và web worker của Facebook; đo theo luồng (`/proc/<pid>/task/*/stat`) mới thấy, đo theo tiến trình thì chỉ thấy "renderer".
+- Gỡ service worker và thay web worker vẫn nhận đủ tin (thử 31/10: chữ, 4 ảnh, cảm xúc vào Libredesk).
+- Watchdog bằng `chrome.alarms` trong service worker không chạy được (SW ngủ, alarm không đánh thức được dù không gọi `create` lặp lại); watchdog nằm trong `entrypoint.sh`.
+
+**Watchdog** (`entrypoint.sh`): mỗi phút xem còn renderer của trang không; mất 2 phút liền (tab "Aw, Snap") thì khởi động lại Chromium (thử 31/10: crash giả 11:19:40, trang chạy lại 11:22:12). Cứ `RESTART_HOURS` (mặc định 6) giờ khởi động lại để xả bộ nhớ. Tin đến lúc khởi động lại vẫn tới: Facebook gửi lại dạng `upsertMessage` còn mới khi trang đồng bộ. Bị đăng xuất thì watchdog không phát hiện; bot báo `dropped` và Telegram.
+
+Gỡ lỗi: `FBWEB_DEBUG=1 docker compose up -d` in console của trang ra `docker compose logs` và mở cổng CDP `127.0.0.1:9222` **bên trong** container (đọc bằng `docker exec ... wget -qO- http://127.0.0.1:9222/json`). Console của service worker không ra log; xem phía bot bằng `docker compose logs fb-bridge-web` trên server3 (`ingest forwarded/skipped/rejected`).
+
+Container gọi `host.docker.internal:7008`, tức SSH tunnel của Mac tới server3. Đây là một phiên Facebook riêng (trình duyệt Linux trên IP nhà), song song với Chrome thường và fb-bot trên server3.
 
 ### Chuyển vào omnichannel (fb-bridge-web)
 

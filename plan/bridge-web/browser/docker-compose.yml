@@ -1,7 +1,8 @@
 # Trình duyệt nghe Fanpage cho fb-bridge-web, chạy trên Mac:
 #   cd plan/bridge-web/browser && cp .env.example .env   # điền FBWEB_TOKEN
-#   docker compose up -d --build
+#   FBWEB_MODE=login docker compose up -d --build        # lần đầu hoặc khi bị đăng xuất
 #   mở http://localhost:6090/vnc.html?autoconnect=1&resize=scale và đăng nhập Facebook
+#   docker compose up -d                                 # chế độ run: không VNC, nhẹ
 # Ingest đi qua SSH tunnel của Mac (127.0.0.1:7008 -> server3), xem omnichannel/fb-bridge-web/README.md.
 name: fbweb-browser
 
@@ -23,6 +24,8 @@ services:
       FBWEB_PAGE_ID: ${FBWEB_PAGE_ID:-109282408574091}
       VNC_PASSWORD: ${VNC_PASSWORD:-}
       FBWEB_DEBUG: ${FBWEB_DEBUG:-0}
+      # run (mặc định, không VNC) hoặc login (thêm noVNC :6090 để đăng nhập).
+      FBWEB_MODE: ${FBWEB_MODE:-run}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
