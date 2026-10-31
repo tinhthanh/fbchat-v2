@@ -92,7 +92,7 @@ Bài học khi đo:
 - `--in-process-gpu` làm Chromium crash ngay. `--no-zygote` không phải nguyên nhân crash (đã thử bỏ, vẫn crash vì H.264), nên dùng lại để bớt hai tiến trình zygote (khoảng 11 MiB).
 - Openbox thu nhỏ cửa sổ (`<iconic>`) không làm trang thành `hidden`; phải giả `visibilityState` trong trang.
 - Đo trang bằng CDP (`Performance.getMetrics` và CPU profile 15 giây): JS của trang rảnh khoảng 90%, JS heap chỉ khoảng 72 MiB. CPU còn lại là service worker và web worker của Facebook; đo theo luồng (`/proc/<pid>/task/*/stat`) mới thấy, đo theo tiến trình thì chỉ thấy "renderer".
-- Gỡ service worker và thay web worker vẫn nhận đủ tin (thử 31/10: chữ, 4 ảnh, cảm xúc vào Libredesk).
+- Gỡ service worker và thay web worker vẫn nhận đủ tin (thử 31/10: chữ, 4 ảnh, cảm xúc vào Libredesk). Ẩn cả `body` và V8 `lite-mode` cũng vậy (3 ảnh, 2 cảm xúc).
 - Watchdog bằng `chrome.alarms` trong service worker không chạy được (SW ngủ, alarm không đánh thức được dù không gọi `create` lặp lại); watchdog nằm trong `entrypoint.sh`.
 
 **Watchdog** (`entrypoint.sh`): mỗi phút xem còn renderer của trang không; mất 2 phút liền (tab "Aw, Snap") thì khởi động lại Chromium (thử 31/10: crash giả 11:19:40, trang chạy lại 11:22:12). Cứ `RESTART_HOURS` (mặc định 6) giờ khởi động lại để xả bộ nhớ. Tin đến lúc khởi động lại vẫn tới: Facebook gửi lại dạng `upsertMessage` còn mới khi trang đồng bộ. Bị đăng xuất thì watchdog không phát hiện; bot báo `dropped` và Telegram.
