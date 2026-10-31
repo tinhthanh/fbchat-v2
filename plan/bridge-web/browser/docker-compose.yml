@@ -24,7 +24,7 @@ services:
       FBWEB_PAGE_ID: ${FBWEB_PAGE_ID:-109282408574091}
       VNC_PASSWORD: ${VNC_PASSWORD:-}
       FBWEB_DEBUG: ${FBWEB_DEBUG:-0}
-      # run (mặc định, không VNC) hoặc login (thêm noVNC :6090 để đăng nhập).
+      # run (mặc định, không VNC), headless (thử nghiệm, không Xvfb) hoặc login (thêm noVNC :6090).
       FBWEB_MODE: ${FBWEB_MODE:-run}
     extra_hosts:
       - "host.docker.internal:host-gateway"

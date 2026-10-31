@@ -25,7 +25,7 @@ umask 022
 # Trang không tự tải video (Chromium Alpine crash renderer khi giải mã H.264, vd. GIF
 # Facebook đổi thành mp4; đo 31/10/2026) và, ở chế độ run, cũng không tải ảnh. File
 # đính kèm vẫn đến: service worker của extension tự tải, luật chỉ áp cho yêu cầu của trang.
-if [ "$MODE" = run ]; then
+if [ "$MODE" != login ]; then
     cp "$EXT/quiet-run.js" "$EXT/quiet.js"
     printf '%s\n' '[{"id":1,"priority":1,"action":{"type":"block"},"condition":{"initiatorDomains":["business.facebook.com"],"resourceTypes":["media","image"]}}]' > "$EXT/rules.json"
 fi
@@ -64,8 +64,16 @@ login | run)
     fi
     set -- --start-maximized
     ;;
+headless)
+    # Thử nghiệm: không Xvfb/openbox. User agent đặt lại như bản có giao diện (headless tự
+    # khai "HeadlessChrome"); quiet-run.js tắt animation nên GPU process không dựng khung liên tục.
+    major=$(chromium-browser --version | grep -oE '[0-9]+' | head -1)
+    set -- --headless=new --window-size=1280,720 \
+        --user-agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36"
+    echo "fbweb-browser: headless mode"
+    ;;
 *)
-    echo "FBWEB_MODE phải là run hoặc login" >&2
+    echo "FBWEB_MODE phải là run, headless hoặc login" >&2
     exit 1
     ;;
 esac
@@ -99,7 +107,7 @@ while :; do
     chromium-browser \
         --no-sandbox --test-type \
         --disable-dev-shm-usage --disable-gpu \
-        --disable-crash-reporter --disable-breakpad \
+        --no-zygote --disable-crash-reporter --disable-breakpad \
         --no-first-run --no-default-browser-check --password-store=basic \
         --user-data-dir="$PROFILE" \
         --load-extension="$EXT" --disable-extensions-except="$EXT" \

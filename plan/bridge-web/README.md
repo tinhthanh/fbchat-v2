@@ -43,6 +43,7 @@ docker compose up -d                          # đăng nhập xong: chế độ 
 |---|---|---|
 | `run` (mặc định) | Xvfb + openbox + Chromium | Chặn video và ảnh của trang; `quiet.js` tắt animation và báo trang đang ở nền |
 | `login` | thêm x11vnc + noVNC `127.0.0.1:6090` | Chỉ chặn video; giao diện bình thường để đăng nhập, xử lý checkpoint |
+| `headless` (thử nghiệm) | Chromium `--headless=new`, không Xvfb/openbox; user agent đặt lại như bản có giao diện | Như `run`. Đo 31/10: khoảng 376 MiB, 1,5-2,7% CPU, chỉ ít hơn `run` khoảng 12 MiB; giữ `run` làm mặc định vì không có dấu hiệu headless |
 
 Hai chế độ dùng chung profile trong volume `fbweb-browser_profile`; xoá volume là đăng xuất.
 
@@ -64,11 +65,14 @@ Hai chế độ dùng chung profile trong volume `fbweb-browser_profile`; xoá v
 | + chặn ảnh/video, `quiet.js` (animation, hidden) | khoảng 5% | 420-480 MiB |
 | + gỡ service worker của Facebook | khoảng 3-4% | khoảng 436 MiB |
 | + `--enable-low-end-device-mode`, `--max-semi-space-size=2` | khoảng 3-4% | khoảng 385 MiB |
-| **+ worker giả cho `webworker_v1`** (hiện tại) | **khoảng 1,5-3%** | **khoảng 388 MiB** (renderer trang khoảng 250 MiB, Chromium khoảng 110-170 MiB, Xvfb khoảng 40 MiB) |
+| + worker giả cho `webworker_v1` | **khoảng 1,5-3%** | khoảng 388 MiB |
+| **+ `--no-zygote`** (hiện tại, `run`) | **khoảng 1,5-3%** | **khoảng 380 MiB** |
+
+Phân bổ bộ nhớ riêng (Pss_Anon) ở `run`: renderer trang khoảng 175 MiB, Chromium khoảng 50, network + storage khoảng 23, Xvfb + openbox khoảng 19, extension khoảng 12, GPU khoảng 12; cgroup còn tính page cache thư viện (khoảng 68 MiB, tự thu hồi được) và shmem `/tmp` (khoảng 40 MiB). Phần duy nhất còn giảm mạnh được là chính renderer của trang, nghĩa là bỏ trình duyệt và nói chuyện thẳng với Lightspeed.
 
 Bài học khi đo:
 - **Renderer crash khi giải mã H.264** (dump có `av:h264`, `subresource_url` là `.mp4` của fbcdn, vd. GIF Facebook đổi thành mp4) trên Chromium Alpine. Vì vậy trang không được tải video. Số "180 MiB, 0% CPU" đo trước khi biết là của một tab đã chết; kiểm tra luôn có renderer của trang (không có `--extension-process`) trước khi tin số đo.
-- `--in-process-gpu` làm Chromium crash ngay. `--no-zygote` không phải nguyên nhân crash nhưng đã bỏ cho an toàn.
+- `--in-process-gpu` làm Chromium crash ngay. `--no-zygote` không phải nguyên nhân crash (đã thử bỏ, vẫn crash vì H.264), nên dùng lại để bớt hai tiến trình zygote (khoảng 11 MiB).
 - Openbox thu nhỏ cửa sổ (`<iconic>`) không làm trang thành `hidden`; phải giả `visibilityState` trong trang.
 - Đo trang bằng CDP (`Performance.getMetrics` và CPU profile 15 giây): JS của trang rảnh khoảng 90%, JS heap chỉ khoảng 72 MiB. CPU còn lại là service worker và web worker của Facebook; đo theo luồng (`/proc/<pid>/task/*/stat`) mới thấy, đo theo tiến trình thì chỉ thấy "renderer".
 - Gỡ service worker và thay web worker vẫn nhận đủ tin (thử 31/10: chữ, 4 ảnh, cảm xúc vào Libredesk).
