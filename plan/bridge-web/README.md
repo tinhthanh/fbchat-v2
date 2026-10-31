@@ -50,7 +50,7 @@ Hai chế độ dùng chung profile trong volume `fbweb-browser_profile`; xoá v
 | Phần | Vai trò |
 |---|---|
 | `extension/manifest.json` | MV3; `quiet.js` và `bs-inbox-listener.js` (chính file của bản Tampermonkey) ở world `MAIN`, `relay.js` ở isolated world, `document_start` trên `/latest/inbox/*` |
-| `extension/quiet.js`, `quiet-run.js` | Bản rỗng cho `login`; `run` dùng `quiet-run.js`: CSS `animation/transition: none`; `document.visibilityState = "hidden"`, `hasFocus() = false`; gỡ và chặn service worker của Facebook; thay web worker `webworker_v1` bằng worker giả |
+| `extension/quiet.js`, `quiet-run.js` | Bản rỗng cho `login`; `run` dùng `quiet-run.js`: CSS `animation/transition: none` và `body{display:none}`; `document.visibilityState = "hidden"`, `hasFocus() = false`; gỡ và chặn service worker của Facebook; thay web worker `webworker_v1` bằng worker giả |
 | `extension/rules.json` | `declarativeNetRequest` chặn `media` (và `image` ở `run`) do trang tự tải; yêu cầu của service worker không bị chặn |
 | `extension/relay.js` | Nhận `postMessage` của script (`__bsInbox: "hello" | "event"`), chuyển cho service worker |
 | `extension/sw.js` | Tải file (cookie trình duyệt), `POST /ingest` có hàng đợi và gửi lại, `POST /heartbeat` mỗi lần trang báo "hello" (30 giây). Fetch của extension không bị CSP của trang chặn |
@@ -66,9 +66,26 @@ Hai chế độ dùng chung profile trong volume `fbweb-browser_profile`; xoá v
 | + gỡ service worker của Facebook | khoảng 3-4% | khoảng 436 MiB |
 | + `--enable-low-end-device-mode`, `--max-semi-space-size=2` | khoảng 3-4% | khoảng 385 MiB |
 | + worker giả cho `webworker_v1` | **khoảng 1,5-3%** | khoảng 388 MiB |
-| **+ `--no-zygote`** (hiện tại, `run`) | **khoảng 1,5-3%** | **khoảng 380 MiB** |
+| + `--no-zygote` | khoảng 1,5-3% | khoảng 380 MiB |
+| + tab nền thật (tab `about:blank` phía trước) | khoảng 0,9-1,9% | khoảng 400-430 MiB (gần như không đổi) |
+| **+ V8 `--lite-mode --optimize-for-size`, `body{display:none}`** (hiện tại) | **khoảng 0,1-0,9%** | **khoảng 320-345 MiB** |
 
-Phân bổ bộ nhớ riêng (Pss_Anon) ở `run`: renderer trang khoảng 175 MiB, Chromium khoảng 50, network + storage khoảng 23, Xvfb + openbox khoảng 19, extension khoảng 12, GPU khoảng 12; cgroup còn tính page cache thư viện (khoảng 68 MiB, tự thu hồi được) và shmem `/tmp` (khoảng 40 MiB). Phần duy nhất còn giảm mạnh được là chính renderer của trang, nghĩa là bỏ trình duyệt và nói chuyện thẳng với Lightspeed.
+Memory dump của renderer trang (tracing `disabled-by-default-memory-infra`, `scratchpad cdpmem.py dump`), trước và sau bước cuối:
+
+| Allocator | Trước (MiB) | Sau (MiB) |
+|---|---|---|
+| `v8` (JS heap) | 75 | 41,6 |
+| `partition_alloc` (Blink) | 47 | 9,2 |
+| `web_cache` (mã nguồn JS/CSS) | 35 | 17 |
+| `malloc` | 21 | 14 |
+| `blink_gc` (DOM) | 20 | 11,5 |
+| `parkable_strings` | 12 | 12,5 |
+| **Tổng** | **228** | **111** |
+
+- `Memory.simulatePressureNotification` + GC qua CDP: Blink dọn được DOM bên trong nhưng RSS không giảm (allocator giữ lại vùng nhớ). Không dùng.
+- Tab nền thật không tự nén `parkable_strings` hay xả `web_cache` đáng kể; chỉ bớt tile dựng hình và chút CPU. Vẫn giữ (rẻ).
+
+Phân bổ bộ nhớ riêng (Pss_Anon) ở `run` trước bước cuối: renderer trang khoảng 175 MiB, Chromium khoảng 50, network + storage khoảng 23, Xvfb + openbox khoảng 19, extension khoảng 12, GPU khoảng 12; cgroup còn tính page cache thư viện (khoảng 68 MiB, tự thu hồi được) và shmem `/tmp` (khoảng 40 MiB). Phần duy nhất còn giảm mạnh được là chính renderer của trang, nghĩa là bỏ trình duyệt và nói chuyện thẳng với Lightspeed.
 
 Bài học khi đo:
 - **Renderer crash khi giải mã H.264** (dump có `av:h264`, `subresource_url` là `.mp4` của fbcdn, vd. GIF Facebook đổi thành mp4) trên Chromium Alpine. Vì vậy trang không được tải video. Số "180 MiB, 0% CPU" đo trước khi biết là của một tab đã chết; kiểm tra luôn có renderer của trang (không có `--extension-process`) trước khi tin số đo.

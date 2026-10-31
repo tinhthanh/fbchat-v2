@@ -31,6 +31,10 @@
   };
   window.Worker.prototype = NativeWorker.prototype;
   const style = document.createElement("style");
-  style.textContent = "*,*::before,*::after{animation:none!important;transition:none!important}";
+  // Không ai nhìn: ẩn cả trang để Blink không giữ layout, không vẽ, không tính lại layout
+  // mỗi khi có tin. JS và socket vẫn chạy (script nghe ở tầng socket, không cần DOM).
+  style.textContent =
+    "*,*::before,*::after{animation:none!important;transition:none!important}" +
+    "body{display:none!important}";
   (document.head || document.documentElement).appendChild(style);
 })();

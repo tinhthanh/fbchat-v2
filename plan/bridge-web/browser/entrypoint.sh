@@ -25,7 +25,11 @@ umask 022
 # Trang không tự tải video (Chromium Alpine crash renderer khi giải mã H.264, vd. GIF
 # Facebook đổi thành mp4; đo 31/10/2026) và, ở chế độ run, cũng không tải ảnh. File
 # đính kèm vẫn đến: service worker của extension tự tải, luật chỉ áp cho yêu cầu của trang.
+FRONT_TAB=""
 if [ "$MODE" != login ]; then
+    # Tab Business Suite nằm sau một tab trống: Chromium coi renderer là tab nền thật
+    # (nén chuỗi mã nguồn, xả cache, trả RAM), như tab nền của Chrome thường.
+    FRONT_TAB="about:blank"
     cp "$EXT/quiet-run.js" "$EXT/quiet.js"
     printf '%s\n' '[{"id":1,"priority":1,"action":{"type":"block"},"condition":{"initiatorDomains":["business.facebook.com"],"resourceTypes":["media","image"]}}]' > "$EXT/rules.json"
 fi
@@ -115,9 +119,9 @@ while :; do
         --enable-features=NetworkServiceInProcess \
         --disable-component-update --disable-sync --disable-default-apps --mute-audio \
         --renderer-process-limit=2 \
-        --enable-low-end-device-mode --js-flags=--max-semi-space-size=2 \
+        --enable-low-end-device-mode --js-flags="--max-semi-space-size=2 --lite-mode --optimize-for-size" \
         --lang=vi-VN $DEBUG_FLAGS "$@" \
-        "$URL" >"$LOG" 2>&1 &
+        $FRONT_TAB "$URL" >"$LOG" 2>&1 &
     echo $! > /tmp/chromium.pid
     wait $! || true
     echo "fbweb-browser: Chromium exited, restarting in 3s"
