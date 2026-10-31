@@ -201,6 +201,19 @@
     console.log("[BS-INBOX]", event);
     W.dispatchEvent(new CustomEvent("bs-inbox-message", { detail: event }));
     if (forwarder) forwarder.push(event);
+    else post("event", { event });
+  }
+
+  // Không có Tampermonkey (extension của image fbweb-browser): gửi qua postMessage
+  // cho content script ở isolated world (structured clone đi được giữa hai world).
+  function post(kind, extra) {
+    W.postMessage({ __bsInbox: kind, pageId: PAGE_ID, pageName: contacts.get(PAGE_ID) || "", ...extra }, location.origin);
+  }
+  // Nhịp sống cho extension: chỉ phát khi trang còn chạy, extension đổi thành heartbeat.
+  let helloTimer = null;
+  if (!forwarder) {
+    post("hello", {});
+    helloTimer = setInterval(() => post("hello", {}), 30000);
   }
 
   // Chuyển sự kiện sang fb-bridge-web (omnichannel). Chỉ có khi chạy bằng
@@ -352,6 +365,7 @@
   W.__bsInboxStop = () => {
     stopped = true;
     if (forwarder) forwarder.stop();
+    clearInterval(helloTimer);
     W.WebSocket = NativeWS;
     NativeWS.prototype.send = nativeSend;
     delete W.__bsInboxStop;

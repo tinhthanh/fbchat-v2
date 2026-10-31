@@ -129,6 +129,39 @@ describe("chuyển tiếp sang fb-bridge-web", () => {
     assert.equal(ingests(rejected.requests).length, 1);
   });
 
+  test("TC-22 không có GM_* (extension fbweb-browser): sự kiện và nhịp sống đi qua postMessage", async () => {
+    const posted = [];
+    class WS {
+      constructor(url) {
+        this.url = url;
+        this.l = [];
+      }
+      addEventListener(t, f) {
+        this.l.push(f);
+      }
+      send() {}
+    }
+    const page = { WebSocket: WS, dispatchEvent() {}, postMessage: (data, origin) => posted.push({ data, origin }) };
+    vm.runInNewContext(SCRIPT, {
+      window: page, location: { search: `?asset_id=${PAGE_ID}`, origin: "https://business.facebook.com" },
+      console: { log() {}, warn() {} }, URLSearchParams, TextDecoder, setInterval: () => 1, clearInterval() {},
+      CustomEvent: class {
+        constructor(type, init) {
+          Object.assign(this, { type }, init);
+        }
+      },
+    });
+    const ws = new page.WebSocket("wss://gateway.facebook.com/ws/lightspeed");
+    ws.l.forEach((fn) => fn({ data: imageFrame("mid.ext") }));
+    assert.deepEqual(posted.map((p) => [p.data.__bsInbox, p.origin]), [
+      ["hello", "https://business.facebook.com"],
+      ["event", "https://business.facebook.com"],
+    ]);
+    assert.equal(posted[1].data.pageId, PAGE_ID);
+    assert.equal(posted[1].data.event.mid, "mid.ext");
+    assert.equal(posted[1].data.event.attachments[0].url, "https://scontent.example/img.jpg");
+  });
+
   test("chưa cấu hình thì không gửi gì ra ngoài", async () => {
     const { requests, ws } = load({ cfg: null });
     ws.receive(imageFrame("mid.x"));

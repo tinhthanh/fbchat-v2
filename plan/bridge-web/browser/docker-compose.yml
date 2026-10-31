@@ -1,0 +1,43 @@
+# Trình duyệt nghe Fanpage cho fb-bridge-web, chạy trên Mac:
+#   cd plan/bridge-web/browser && cp .env.example .env   # điền FBWEB_TOKEN
+#   docker compose up -d --build
+#   mở http://localhost:6090/vnc.html?autoconnect=1&resize=scale và đăng nhập Facebook
+# Ingest đi qua SSH tunnel của Mac (127.0.0.1:7008 -> server3), xem omnichannel/fb-bridge-web/README.md.
+name: fbweb-browser
+
+services:
+  browser:
+    build:
+      context: ..
+      dockerfile: browser/Dockerfile
+    image: fbweb-browser
+    restart: unless-stopped
+    read_only: true
+    ports:
+      # Chỉ bind localhost; không mở noVNC ra mạng.
+      - "127.0.0.1:6090:6090"
+    environment:
+      FBWEB_URL: ${FBWEB_URL:-http://host.docker.internal:7008}
+      FBWEB_TOKEN: ${FBWEB_TOKEN:?điền FBWEB_TOKEN trong .env}
+      FBWEB_ACCOUNT: ${FBWEB_ACCOUNT:-vetgo}
+      FBWEB_PAGE_ID: ${FBWEB_PAGE_ID:-109282408574091}
+      VNC_PASSWORD: ${VNC_PASSWORD:-}
+      FBWEB_DEBUG: ${FBWEB_DEBUG:-0}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - profile:/data
+    tmpfs:
+      # --disable-dev-shm-usage: Chromium ghi bộ nhớ chia sẻ vào /tmp.
+      - /tmp:size=256m,uid=1000,gid=1000
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 1g }
+    logging:
+      driver: json-file
+      options: { max-size: "2m", max-file: "2" }
+
+volumes:
+  profile:

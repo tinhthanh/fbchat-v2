@@ -27,7 +27,7 @@ Từ thư mục gốc repo (cần Node 18 trở lên, đã thử với 22):
 node --test 'plan/bridge-web/test-case/*.test.js'
 ```
 
-Kết quả mong đợi: `# pass 37`, `# fail 0`. Phải có dấu nháy quanh glob; Node 22 không nhận thư mục làm tham số.
+Kết quả mong đợi: `# pass 38`, `# fail 0`. Phải có dấu nháy quanh glob; Node 22 không nhận thư mục làm tham số.
 
 Chạy một file hoặc một TC:
 

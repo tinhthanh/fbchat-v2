@@ -7,6 +7,7 @@ Ghi chú cho session sau: script làm gì, dữ liệu đi qua đâu, cách bắ
 | File | Vai trò |
 |---|---|
 | `bs-inbox-listener.js` | Script chạy trong trang Hộp thư Business Suite, in tin khách ra console |
+| `browser/` | Image Docker `fbweb-browser` (Chromium + extension + noVNC) để chạy trên Mac không cần Tampermonkey |
 | `test-case/` | Test tự động (Node) và checklist test trên trang thật, xem [`test-case/README.md`](test-case/README.md) |
 | `fixtures/frames-2026-10-31.json` | Tin chữ, ảnh, 3 ảnh, video, tin thoại, PDF, sticker, link, trả lời, thả cảm xúc |
 | `fixtures/frames-2026-10-31-newthread.json` | Khách mới nhắn lần đầu (Like), tin thoại, video, GIF |
@@ -15,7 +16,7 @@ Ghi chú cho session sau: script làm gì, dữ liệu đi qua đâu, cách bắ
 Trong fixture, URL CDN có chữ ký đã thay bằng `<url>`, MPD video thay bằng `<mpd>`.
 
 ```bash
-node --test 'plan/bridge-web/test-case/*.test.js'   # pass 37, fail 0
+node --test 'plan/bridge-web/test-case/*.test.js'   # pass 38, fail 0
 ```
 
 ## 🚀 Dùng
@@ -25,6 +26,30 @@ Trang: `https://business.facebook.com/latest/inbox/all/?asset_id=<page id>`. `as
 - **Tampermonkey**: cài file, header `@run-at document-start` bắt socket ngay từ đầu (cả đợt đồng bộ lúc tải trang, có tên khách của các hội thoại gần đây). `@sandbox JavaScript` + `unsafeWindow`: script chạy cạnh trang nhưng vẫn có `GM_*`.
 - **DevTools Console**: dán nội dung file. Socket đang mở được bắt ở lần `ws.send()` kế tiếp (ping, vài giây). Chỉ in console, không chuyển tiếp (không có `GM_xmlhttpRequest`).
 - Dừng: `window.__bsInboxStop()`.
+
+### Chạy bằng Docker trên Mac (khuyến nghị)
+
+`browser/` là image `fbweb-browser`: Chromium trên Alpine, mở Hộp thư Business Suite với extension tự viết nạp sẵn (không cần Tampermonkey), noVNC ở `127.0.0.1:6090` chỉ để đăng nhập và xem.
+
+```bash
+cd plan/bridge-web/browser
+cp .env.example .env            # điền FBWEB_TOKEN (lệnh lấy token ghi trong file), quyền 600
+docker compose up -d --build
+open "http://localhost:6090/vnc.html?autoconnect=1&resize=scale"   # đăng nhập Facebook một lần
+```
+
+| Phần | Vai trò |
+|---|---|
+| `extension/manifest.json` | MV3; `bs-inbox-listener.js` (chính file của bản Tampermonkey) chạy ở world `MAIN` từ `document_start` trên `/latest/inbox/*` |
+| `extension/relay.js` | Isolated world: nhận `postMessage` của script (`__bsInbox: "hello" | "event"`), chuyển cho service worker |
+| `extension/sw.js` | Tải file (cookie trình duyệt), `POST /ingest` với hàng đợi và gửi lại, `POST /heartbeat` mỗi lần trang báo "hello" (30 giây). Fetch của extension không bị CSP của trang chặn |
+| `entrypoint.sh` | Xvfb, openbox, x11vnc, websockify; ghi `config.json` (token) vào bản sao extension trong tmpfs; mở lại Chromium nếu tắt |
+
+- Profile nằm trong volume `fbweb-browser_profile`: khởi động lại không phải đăng nhập lại. Xoá volume là đăng xuất.
+- Container gọi `host.docker.internal:7008`, tức SSH tunnel của Mac tới server3.
+- Đo 31/10/2026: image 857 MB (gần hết là gói `chromium`), RAM 200-400 MiB, CPU khoảng 1% lúc rảnh; giới hạn 1 GiB, 1 CPU.
+- Gỡ lỗi: `FBWEB_DEBUG=1 docker compose up -d` in console của trang (dòng `[BS-INBOX]`) ra `docker compose logs`. Console của service worker không ra log; xem phía bot bằng `docker compose logs fb-bridge-web` trên server3 (`ingest forwarded/skipped/rejected`).
+- Đây là một phiên Facebook riêng (trình duyệt Linux trên IP nhà), song song với Chrome thường và fb-bot trên server3.
 
 ### Chuyển vào omnichannel (fb-bridge-web)
 
