@@ -1,0 +1,26 @@
+[
+ {
+  "t": 1793434923000,
+  "calls": [
+   ["editMessage", "mid.$cAAA5kHeMT52nwlJIPmhkQz-pseO6", "80", "Tin nhắn gửi, đã chỉnh sửa", "1"],
+   ["handleRepliesOnMessageEdit"],
+   ["updateThreadSnippetFromLastMessageV2"],
+   ["updateMessageTranslationInfo"],
+   ["updateOrInsertEditMessageHistory"]
+  ]
+ },
+ {
+  "t": 1793434954700,
+  "calls": [
+   ["upsertReaction", "100005036221206", "1793434910782", "mid.$cAAA5kHeMT52nwlJIPmhkQz-pseO6", "100005036221206", "👍", "80", "1793434954603"],
+   ["updateReadReceipt", "1793434954603", "100005036221206", "100005036221206", "0"]
+  ]
+ },
+ {
+  "t": 1793435235000,
+  "calls": [
+   ["deleteReaction", "100005036221206", "mid.$cAAA5kHeMT52nwlJIPmhkQz-pseO6", "100005036221206"],
+   ["updateReadReceipt", "1793434910782", "100005036221206", "100005036221206", "0"]
+  ]
+ }
+]
