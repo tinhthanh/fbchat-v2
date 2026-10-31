@@ -8,7 +8,7 @@ set -eu
 : "${FBWEB_ACCOUNT:?thiếu FBWEB_ACCOUNT}"
 : "${FBWEB_PAGE_ID:?thiếu FBWEB_PAGE_ID}"
 FBWEB_URL="${FBWEB_URL:-http://host.docker.internal:7008}"
-SCREEN="${SCREEN:-1280x800}"
+SCREEN="${SCREEN:-1280x720}"
 PROFILE=/data/profile
 EXT=/tmp/fbweb-ext
 
@@ -50,10 +50,12 @@ while :; do
     chromium-browser \
         --no-sandbox --test-type \
         --disable-dev-shm-usage --disable-gpu \
+        --no-zygote --disable-crash-reporter --disable-breakpad \
         --no-first-run --no-default-browser-check --password-store=basic \
         --user-data-dir="$PROFILE" \
         --load-extension="$EXT" --disable-extensions-except="$EXT" \
-        --disable-features=DisableLoadExtensionCommandLineSwitch,Translate,MediaRouter,OptimizationHints,AutofillServerCommunication \
+        --disable-features=DisableLoadExtensionCommandLineSwitch,Translate,MediaRouter,OptimizationHints,AutofillServerCommunication,AudioServiceOutOfProcess,BackForwardCache,SpareRendererForSitePerProcess \
+        --enable-features=NetworkServiceInProcess \
         --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows \
         --disable-component-update --disable-sync --disable-default-apps --mute-audio \
         --renderer-process-limit=2 \

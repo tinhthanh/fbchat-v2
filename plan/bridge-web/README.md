@@ -47,7 +47,7 @@ open "http://localhost:6090/vnc.html?autoconnect=1&resize=scale"   # đăng nh�
 
 - Profile nằm trong volume `fbweb-browser_profile`: khởi động lại không phải đăng nhập lại. Xoá volume là đăng xuất.
 - Container gọi `host.docker.internal:7008`, tức SSH tunnel của Mac tới server3.
-- Đo 31/10/2026: image 857 MB (gần hết là gói `chromium`), RAM 200-400 MiB, CPU khoảng 1% lúc rảnh; giới hạn 1 GiB, 1 CPU.
+- Đo 31/10/2026: image 857 MB (gần hết là gói `chromium`), RAM khoảng 180 MiB, CPU dưới 1% lúc rảnh; giới hạn 1 GiB, 1 CPU. Cờ giảm tiến trình: `--no-zygote`, audio và network service chạy chung tiến trình, tắt crash reporter và back-forward cache, màn hình 1280x720. **Không** dùng `--in-process-gpu`: Chromium Alpine crash ngay (`Trace/breakpoint trap`).
 - Gỡ lỗi: `FBWEB_DEBUG=1 docker compose up -d` in console của trang (dòng `[BS-INBOX]`) ra `docker compose logs`. Console của service worker không ra log; xem phía bot bằng `docker compose logs fb-bridge-web` trên server3 (`ingest forwarded/skipped/rejected`).
 - Đây là một phiên Facebook riêng (trình duyệt Linux trên IP nhà), song song với Chrome thường và fb-bot trên server3.
 
