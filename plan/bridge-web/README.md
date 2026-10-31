@@ -2,6 +2,8 @@
 
 Ghi chú cho session sau: script làm gì, dữ liệu đi qua đâu, cách bắt lại frame khi Meta đổi định dạng. Không liên quan tới `omnichannel/` hay `fbpage-bot` (bot đó dùng Graph API chính thức).
 
+Bản không cần trình duyệt (chương trình Go tự mở socket Lightspeed, đang thử): [`../bridge-ls/README.md`](../bridge-ls/README.md). Parse frame ở hai nơi (`bs-inbox-listener.js` và `bridge-ls/lsparse.go`), sửa một bên thì sửa cả bên kia.
+
 ## 📂 Nội dung
 
 | File | Vai trò |
