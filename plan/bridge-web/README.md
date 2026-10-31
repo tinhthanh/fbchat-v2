@@ -68,7 +68,8 @@ Hai chế độ dùng chung profile trong volume `fbweb-browser_profile`; xoá v
 | + worker giả cho `webworker_v1` | **khoảng 1,5-3%** | khoảng 388 MiB |
 | + `--no-zygote` | khoảng 1,5-3% | khoảng 380 MiB |
 | + tab nền thật (tab `about:blank` phía trước) | khoảng 0,9-1,9% | khoảng 400-430 MiB (gần như không đổi) |
-| **+ V8 `--lite-mode --optimize-for-size`, `body{display:none}`** (hiện tại) | **khoảng 0,1-0,9%** | **khoảng 320-345 MiB** |
+| + V8 `--lite-mode --optimize-for-size`, `body{display:none}` | khoảng 0,1-0,9% | khoảng 320-345 MiB |
+| **+ tắt `MemoryCacheStrongReference`** (hiện tại) | **khoảng 0-0,5%** | **khoảng 260 MiB** (`web_cache` 24 -> 9,5 MiB) |
 
 Memory dump của renderer trang (tracing `disabled-by-default-memory-infra`, `scratchpad cdpmem.py dump`), trước và sau bước cuối:
 
@@ -82,6 +83,9 @@ Memory dump của renderer trang (tracing `disabled-by-default-memory-infra`, `s
 | `parkable_strings` | 12 | 12,5 |
 | **Tổng** | **228** | **111** |
 
+- Audit 31/10 (lớp cgroup, từng tiến trình, memory-infra mọi tiến trình): mỗi tiến trình Chromium có phí cố định khoảng 8-12 MiB ngoài phần allocator (network dùng 7 MiB nhưng chiếm 17, storage 5/16, extension 12/21, GPU 10/16). Bớt được tiến trình là bớt phí đó.
+- `--enable-features=NetworkServiceInProcess2` gộp được network service (tên cũ `NetworkServiceInProcess` không có tác dụng) nhưng **làm treo việc tải trang thật** (profile + extension; trang trống thì tải được). Không dùng. Gộp storage service: không có cờ nào còn tác dụng.
+- Còn lại (khoảng 250 MiB anon): renderer trang khoảng 113 (V8 36, `parkable_strings` 19, malloc 14, DOM 10, `web_cache` 9,5), Chromium chính 47, extension 21, network 17, storage 16, GPU 16, Xvfb 16, openbox 3.
 - `Memory.simulatePressureNotification` + GC qua CDP: Blink dọn được DOM bên trong nhưng RSS không giảm (allocator giữ lại vùng nhớ). Không dùng.
 - Tab nền thật không tự nén `parkable_strings` hay xả `web_cache` đáng kể; chỉ bớt tile dựng hình và chút CPU. Vẫn giữ (rẻ).
 

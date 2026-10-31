@@ -115,7 +115,7 @@ while :; do
         --no-first-run --no-default-browser-check --password-store=basic \
         --user-data-dir="$PROFILE" \
         --load-extension="$EXT" --disable-extensions-except="$EXT" \
-        --disable-features=DisableLoadExtensionCommandLineSwitch,Translate,MediaRouter,OptimizationHints,AutofillServerCommunication,AudioServiceOutOfProcess,BackForwardCache,SpareRendererForSitePerProcess \
+        --disable-features=DisableLoadExtensionCommandLineSwitch,Translate,MediaRouter,OptimizationHints,AutofillServerCommunication,AudioServiceOutOfProcess,BackForwardCache,SpareRendererForSitePerProcess,MemoryCacheStrongReference \
         --enable-features=NetworkServiceInProcess \
         --disable-component-update --disable-sync --disable-default-apps --mute-audio \
         --renderer-process-limit=2 \
