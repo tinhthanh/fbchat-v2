@@ -3,10 +3,11 @@
 #   ./export-cookies.sh                    # lấy cookie phiên từ fbweb-browser vào ./data
 #   docker compose run --rm ls check       # tải trang Hộp thư một lần, không mở socket
 #   docker compose up -d --build           # chạy
+#   docker compose --profile test up -d ls-test   # Trang thử, chỉ bật khi thử (khách là acc2)
 name: fbweb-ls
 
 services:
-  ls:
+  ls: &ls
     build:
       context: .
       additional_contexts:
@@ -38,3 +39,18 @@ services:
     logging:
       driver: json-file
       options: { max-size: "2m", max-file: "2" }
+
+  # Trang thử 1364936880042409 (tài khoản fb-bridge-web vetgo-test), chung cookie
+  # với ls, cursor riêng. Chỉ bật khi thử rồi tắt: hai socket trên cùng một phiên.
+  ls-test:
+    <<: *ls
+    profiles: [test]
+    environment:
+      FBWEB_URL: ${FBWEB_URL:-http://host.docker.internal:7008}
+      FBWEB_ACCOUNT: vetgo-test
+      FBWEB_PAGE_ID: "1364936880042409"
+      FBLS_PAGE_NAME: VetGo Test
+      FBLS_STATE: state-test.json
+      FBLS_DRY_RUN: ${FBLS_DRY_RUN:-0}
+      FBLS_DEBUG: ${FBLS_DEBUG:-0}
+      GOMEMLIMIT: 40MiB

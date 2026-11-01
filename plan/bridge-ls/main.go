@@ -43,6 +43,7 @@ func run(log *slog.Logger) error {
 		PageID:    os.Getenv("FBWEB_PAGE_ID"),
 		PageName:  os.Getenv("FBLS_PAGE_NAME"),
 		DataDir:   env("FBLS_DATA", "/data"),
+		StateFile: env("FBLS_STATE", "state.json"),
 		UserAgent: defaultUserAgent,
 	}
 	if ua := os.Getenv("FBLS_USER_AGENT"); ua != "" {
@@ -76,7 +77,7 @@ func run(log *slog.Logger) error {
 	if !fwd.DryRun && (len(fwd.Token) < 32 || fwd.Account == "") {
 		return fmt.Errorf("FBWEB_TOKEN (32+ characters) and FBWEB_ACCOUNT are required unless FBLS_DRY_RUN=1")
 	}
-	l.fwd = NewForwarder(fwd, httpClient, jar, cfg.UserAgent, log)
+	l.fwd = NewForwarder(fwd, newDownloadClient(), jar, cfg.UserAgent, log)
 	log.Info("fbweb-ls started", "page", cfg.PageID, "dry_run", fwd.DryRun)
 	l.Run(ctx)
 	return nil

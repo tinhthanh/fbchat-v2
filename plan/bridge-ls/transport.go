@@ -63,6 +63,26 @@ func newHTTPClient() *req.Client {
 		SetTimeout(60 * time.Second)
 }
 
+// Link file trong tin (video, có khi cả tin thoại) trỏ tới facebook.com rồi chuyển
+// hướng sang CDN, như trình duyệt vẫn theo. Chỉ theo tới facebook.com hoặc fbcdn.net
+// qua https; Go tự bỏ cookie khi chuyển sang tên miền khác.
+var downloadHosts = []string{"facebook.com", "fbcdn.net"}
+
+func newDownloadClient() *req.Client {
+	return newHTTPClient().SetRedirectPolicy(func(r *http.Request, via []*http.Request) error {
+		if len(via) >= 5 {
+			return fmt.Errorf("stopped after %d redirects", len(via))
+		}
+		host := r.URL.Hostname()
+		for _, d := range downloadHosts {
+			if r.URL.Scheme == "https" && (host == d || strings.HasSuffix(host, "."+d)) {
+				return nil
+			}
+		}
+		return fmt.Errorf("redirect to %s not allowed", host)
+	})
+}
+
 // newWebsocketClient: client HTTP/1.1 cho bắt tay WebSocket, TLS giả Chrome,
 // URL và header viết lại theo đúng thứ tự trình duyệt gửi.
 func newWebsocketClient(ua UserAgent, pageID string, regionHint func() string) *http.Client {

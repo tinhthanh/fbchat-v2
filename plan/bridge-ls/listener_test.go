@@ -165,7 +165,7 @@ func TestSendSyncParamsDoesNotSaveCursor(t *testing.T) {
 	// executeFirstBlock: 205, epoch, cur, next, seq -1, status 3, sendSyncParams true (giống phản hồi thật 31/10).
 	step := []any{5, "executeFirstBlockForSyncTransactionV4", []any{19, "205"}, []any{19, "1"}, "page-cursor", "tmp", []any{19, "-1"}, []any{19, "3"}, true}
 	err := l.handleFrame(context.Background(), frameOf(t, step))
-	if err == nil || l.cursor != "page-cursor" || loadState(l.statePath()).Cursor != "" {
+	if err != nil || l.cursor != "page-cursor" || loadState(l.statePath()).Cursor != "" {
 		t.Fatalf("err %v cursor %q", err, l.cursor)
 	}
 }
@@ -384,7 +384,8 @@ func TestGapRecoveryFromSnapshot(t *testing.T) {
 	for len(l.fwd.queue) > 0 {
 		mids = append(mids, (<-l.fwd.queue).Mid)
 	}
-	if strings.Join(mids, ",") != "mid.gap,mid.margin" {
+	// Ảnh chụp liệt kê tin mới nhất trước; gửi đi theo thứ tự thời gian.
+	if strings.Join(mids, ",") != "mid.margin,mid.gap" {
 		t.Fatalf("recovered %v", mids)
 	}
 	// Frame vừa báo theo kịp: mốc còn sống được ghi lại.

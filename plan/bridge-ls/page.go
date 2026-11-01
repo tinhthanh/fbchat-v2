@@ -171,7 +171,37 @@ func fetchPage(ctx context.Context, client *req.Client, jar *CookieJar, ua UserA
 	case resp.StatusCode != http.StatusOK:
 		return nil, fmt.Errorf("fetch inbox page: HTTP %d", resp.StatusCode)
 	}
-	return parsePage(resp.Bytes())
+	info, err := parsePage(resp.Bytes())
+	if err != nil {
+		return nil, fmt.Errorf("%w (%s)", err, describeHTML(resp.Bytes()))
+	}
+	return info, nil
+}
+
+var (
+	titleRe    = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
+	scriptRe   = regexp.MustCompile(`(?is)<(script|style|noscript)[^>]*>.*?</(script|style|noscript)>`)
+	tagRe      = regexp.MustCompile(`(?s)<[^>]*>`)
+	redirectRe = regexp.MustCompile(`location\.(?:replace|href)\s*(?:\(|=)\s*"([^"]+)"`)
+)
+
+// describeHTML tóm tắt trang không đọc được: kích thước, tiêu đề, số khối JSON và
+// đường dẫn chuyển hướng bằng JavaScript (bỏ query), không in dữ liệu phiên.
+func describeHTML(html []byte) string {
+	title := ""
+	if m := titleRe.FindSubmatch(html); m != nil {
+		title = strings.TrimSpace(string(m[1]))
+	}
+	redirect := ""
+	if m := redirectRe.FindSubmatch(html); m != nil {
+		redirect = redactURL(strings.ReplaceAll(string(m[1]), `\/`, "/"))
+	}
+	text := strings.Join(strings.Fields(tagRe.ReplaceAllString(scriptRe.ReplaceAllString(string(html), " "), " ")), " ")
+	if r := []rune(text); len(r) > 300 {
+		text = string(r[:300])
+	}
+	return fmt.Sprintf("bytes=%d title=%q json_scripts=%d js_redirect=%q text=%q",
+		len(html), title, len(jsonScriptRe.FindAll(html, -1)), redirect, text)
 }
 
 // redactURL bỏ query (có thể chứa token) khi ghi log.

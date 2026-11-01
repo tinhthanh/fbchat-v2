@@ -16,6 +16,8 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -49,6 +51,7 @@ type Config struct {
 	PageID    string
 	PageName  string // dự phòng khi trang chưa cho biết tên Trang
 	DataDir   string
+	StateFile string // mặc định state.json; mỗi Trang một file khi chạy nhiều bản chung cookie
 	UserAgent UserAgent
 }
 
@@ -71,10 +74,11 @@ type Listener struct {
 	seen        *dedupe
 	requestID   int
 	stream      *dgw.PersistentStream
-	resyncs     int   // số lần đồng bộ lại (type 1) trong kết nối này
-	catchups    int   // số lần đồng bộ tiếp (type 2) để theo kịp trong kết nối này
-	snapshotReq int64 // request type 1 gần nhất: phản hồi của nó là ảnh chụp lịch sử
-	liveUntilMs int64 // mốc cuối cùng còn theo kịp server (state.json)
+	streamReady chan struct{} // đóng khi stream của kết nối hiện tại đã có (onConnect)
+	resyncs     int           // số lần đồng bộ lại (type 1) trong kết nối này
+	catchups    int           // số lần đồng bộ tiếp (type 2) để theo kịp trong kết nối này
+	snapshotReq int64         // request type 1 gần nhất: phản hồi của nó là ảnh chụp lịch sử
+	liveUntilMs int64         // mốc cuối cùng còn theo kịp server (state.json)
 
 	caughtUp atomic.Bool
 
@@ -88,7 +92,13 @@ func NewListener(cfg Config, jar *CookieJar, httpClient *req.Client, log *slog.L
 	return l
 }
 
-func (l *Listener) statePath() string { return l.cfg.DataDir + "/state.json" }
+func (l *Listener) statePath() string {
+	name := l.cfg.StateFile
+	if name == "" {
+		name = "state.json"
+	}
+	return filepath.Join(l.cfg.DataDir, name)
+}
 
 func (l *Listener) regionHint() string {
 	l.mu.Lock()
@@ -223,8 +233,10 @@ func (l *Listener) onConnect(ctx context.Context, sock *dgw.Socket, fatal func(e
 	if err != nil {
 		return err
 	}
+	ready := make(chan struct{})
 	l.mu.Lock()
 	l.resyncs, l.catchups, l.snapshotReq = 0, 0, 0
+	l.stream, l.streamReady = nil, ready
 	l.caughtUp.Store(false)
 	l.mu.Unlock()
 	stream, err := sock.EstablishStream(ctx, dgw.StreamInit{
@@ -240,6 +252,7 @@ func (l *Listener) onConnect(ctx context.Context, sock *dgw.Socket, fatal func(e
 	l.mu.Lock()
 	l.stream = stream
 	l.mu.Unlock()
+	close(ready)
 	l.connected.Store(true)
 	l.log.Info("listening", "page", l.cfg.PageID)
 	go l.fwd.Heartbeat(ctx)
@@ -330,13 +343,14 @@ func (l *Listener) handleFrame(_ context.Context, data []byte) error {
 		}
 		l.resyncs++
 		req, err := l.syncRequestLocked(true)
-		stream := l.stream
+		ready := l.streamReady
 		l.mu.Unlock()
 		if err != nil {
 			return err
 		}
 		l.log.Info("server asked for a full resync", "sync_status", str(block.Args, 5))
-		return l.send(stream, req)
+		l.send(ready, req)
+		return nil
 	}
 	if hasCursor && cursor != l.cursor {
 		l.cursor = cursor
@@ -365,7 +379,7 @@ func (l *Listener) handleFrame(_ context.Context, data []byte) error {
 		l.liveUntilMs = time.Now().UnixMilli()
 		l.saveStateLocked()
 	}
-	stream := l.stream
+	ready := l.streamReady
 	var events []Event
 	if snapshot {
 		events = l.gapMessages(calls, liveBefore)
@@ -380,9 +394,7 @@ func (l *Listener) handleFrame(_ context.Context, data []byte) error {
 	}
 	l.mu.Unlock()
 	if catchup != nil {
-		if err := l.send(stream, catchup); err != nil {
-			return err
-		}
+		l.send(ready, catchup)
 	}
 	if l.log.Enabled(context.Background(), slog.LevelDebug) {
 		var rid int64
@@ -473,16 +485,23 @@ func describeCalls(calls []call) []string {
 
 // send gửi request trên stream db 205 mà không chặn goroutine frame của dgw
 // (SendData chờ ack, ack đến qua chính vòng đọc).
-func (l *Listener) send(stream *dgw.PersistentStream, req []byte) error {
-	if stream == nil {
-		return errors.New("sync request before the stream was ready")
-	}
+func (l *Listener) send(ready <-chan struct{}, req []byte) {
 	go func() {
+		// Frame trả lời InitPayload có thể đến trước khi EstablishStream trả về
+		// (thử thật 01/11/2026): chờ stream của kết nối này rồi mới gửi.
+		select {
+		case <-ready:
+		case <-time.After(30 * time.Second):
+			l.log.Warn("send sync request failed", "error", "stream not ready")
+			return
+		}
+		l.mu.Lock()
+		stream := l.stream
+		l.mu.Unlock()
 		if err := stream.SendData(context.Background(), req); err != nil {
 			l.log.Warn("send sync request failed", "error", err)
 		}
 	}()
-	return nil
 }
 
 // gapMessages: ảnh chụp lịch sử lúc đồng bộ lại chỉ cho ra tin của khách đến sau
@@ -504,6 +523,8 @@ func (l *Listener) gapMessages(calls []call, liveUntilMs int64) []Event {
 			out = append(out, e)
 		}
 	}
+	// Ảnh chụp liệt kê tin mới nhất trước (thử thật 01/11/2026): gửi theo thứ tự thời gian.
+	sort.SliceStable(out, func(i, j int) bool { return out[i].TimestampMs < out[j].TimestampMs })
 	if len(out) > 0 {
 		l.log.Info("recovered messages from the resync snapshot", "count", len(out))
 	}

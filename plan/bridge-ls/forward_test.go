@@ -15,7 +15,7 @@ func testForwarder(t *testing.T, url string) *Forwarder {
 	t.Helper()
 	jar := testJar(t, t.TempDir())
 	return NewForwarder(Forwarder{URL: url, Token: testToken, Account: "vetgo", PageID: testPageID, PageName: func() string { return "VetGo" }},
-		newHTTPClient().EnableInsecureSkipVerify(), jar, defaultUserAgent, testLog())
+		newDownloadClient().EnableInsecureSkipVerify(), jar, defaultUserAgent, testLog())
 }
 
 func shortRetries(t *testing.T) {
@@ -64,6 +64,10 @@ func TestWithFiles(t *testing.T) {
 		switch r.URL.Path {
 		case "/ok.jpg":
 			_, _ = w.Write([]byte("JPEG"))
+		case "/video":
+			http.Redirect(w, r, "/ok.jpg", http.StatusFound)
+		case "/away":
+			http.Redirect(w, r, "https://example.com/x", http.StatusFound)
 		case "/big.mp4":
 			_, _ = w.Write(big)
 		default:
@@ -71,6 +75,9 @@ func TestWithFiles(t *testing.T) {
 		}
 	}))
 	defer cdn.Close()
+	old := downloadHosts
+	downloadHosts = append(downloadHosts, "127.0.0.1")
+	t.Cleanup(func() { downloadHosts = old })
 	f := testForwarder(t, "")
 	e := f.withFiles(context.Background(), Event{Kind: "message", Attachments: []Attachment{
 		{Kind: "image", URL: cdn.URL + "/ok.jpg"},
@@ -78,9 +85,12 @@ func TestWithFiles(t *testing.T) {
 		{Kind: "file", URL: cdn.URL + "/gone"},
 		{Kind: "sticker", StickerID: likeSticker, URL: cdn.URL + "/like"},
 		{Kind: "link", URL: "https://vetgo.tech"},
+		{Kind: "video", URL: cdn.URL + "/video"},
+		{Kind: "video", URL: cdn.URL + "/away"},
 	}})
 	a := e.Attachments
-	if string(a[0].Data) != "JPEG" || a[1].Error != "file quá 20 MiB" || a[2].Error != "HTTP 404" || a[3].Data != nil || a[4].Data != nil {
+	if string(a[0].Data) != "JPEG" || a[1].Error != "file quá 20 MiB" || a[2].Error != "HTTP 404" || a[3].Data != nil || a[4].Data != nil ||
+		string(a[5].Data) != "JPEG" || a[6].Error != "lỗi mạng" {
 		t.Fatalf("got %+v", a)
 	}
 	// data đi dưới dạng base64 trong JSON, như extension gửi.

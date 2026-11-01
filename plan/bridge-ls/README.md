@@ -2,7 +2,7 @@
 
 `fbweb-ls` là chương trình Go nhỏ thay cho `../bridge-web/browser` (Chromium khoảng 260 MiB). Nó tự mở `wss://gateway.facebook.com/ws/lightspeed` bằng phiên đã đăng nhập trong fbweb-browser, đọc frame Lightspeed của hộp thư Trang và gửi sang `fb-bridge-web` của omnichannel đúng như extension của trình duyệt (`/ingest`, `/heartbeat`). omnichannel không phải đổi gì.
 
-**Trạng thái 31/10/2026:** chạy thật thay cho fbweb-browser từ 16:00, Trang VetGo: chữ, ảnh, PDF, cảm xúc, sửa tin vào Libredesk; khoảng 11-14 MiB RAM, CPU 0,1%. Chưa thử thật: tin thoại, video, khách mới, lấy lại tin sau khi mất kết nối. Chưa chạy lâu.
+**Trạng thái 01/11/2026:** chạy thật thay cho fbweb-browser từ 31/10 16:00, Trang VetGo; khoảng 11-14 MiB RAM, CPU 0,1%. Đã thử thật trên Trang thử (mục dưới): chữ, ảnh, PDF, tin thoại, video (kể cả 5 MB), sticker, Like, trả lời tin (kể cả tin của Trang), sửa tin, cảm xúc, khách mới, lấy lại tin sau khi mất kết nối (2 phút trên Trang thử, 11 giờ 38 phút trên Trang VetGo). Chưa chạy lâu.
 
 ## 🔍 Trình duyệt gửi gì (ghi bằng CDP 31/10/2026)
 
@@ -39,6 +39,10 @@ Payload: `{"database":205,"epoch_id":<ms<<22|42>,"failure_count":null,"last_appl
 - **Server chỉ đẩy tin sau khi client theo kịp**: gửi tiếp `type 2` với `nextCursor` cho tới khi `nextCursor == currentCursor` (trình duyệt làm vậy với db 2). Thiếu bước này thì socket sống nhưng không có tin (thử thật hai lần).
 - Tin đẩy: frame data không `request_id`, mỗi frame một `executeFirstBlockForSyncTransactionV4` (seq tăng dần) + `insertMessage`/`insertBlobAttachment`..., như frame của trình duyệt.
 
+- Frame trả lời request đầu tiên có thể đến trước khi `EstablishStream` trả về: request đồng bộ tiếp phải chờ stream sẵn sàng (thử thật 01/11).
+- Ảnh chụp liệt kê tin mới nhất trước; tin lấy lại được sắp theo thời gian trước khi gửi.
+- Link video (và có khi file khác) trỏ tới facebook.com rồi chuyển hướng `302` sang CDN: client tải file theo chuyển hướng, chỉ tới facebook.com hoặc fbcdn.net qua https.
+
 Hệ quả: mỗi lần nối lại là một ảnh chụp lịch sử. Ảnh chụp không được đổ vào Libredesk; chỉ lấy lại **tin của khách mới hơn mốc còn sống cuối cùng** (`live_until_ms` trong `state.json`, ghi mỗi 30 giây khi đã theo kịp, lùi 1 phút, tối đa 24 giờ). Lần chạy đầu không có mốc nên không lấy gì. Cảm xúc và sửa tin trong lúc mất kết nối không lấy lại được. Ảnh chụp chỉ có vài tin gần nhất của mỗi hội thoại: mất kết nối lâu mà một khách nhắn nhiều tin thì có thể thiếu tin cũ hơn.
 
 ## ⚙️ Cách chạy
@@ -69,9 +73,20 @@ FBLS_DRY_RUN=1 docker compose up -d --build       # chỉ log loại/mid sự ki
 docker compose up -d                              # gửi thật (dùng .env của ../bridge-web/browser)
 ```
 
-Biến môi trường: `FBWEB_PAGE_ID`, `FBWEB_ACCOUNT`, `FBWEB_TOKEN`, `FBWEB_URL` (như fbweb-browser), `FBLS_DRY_RUN`, `FBLS_DEBUG`, `FBLS_PAGE_NAME` (dự phòng), `FBLS_USER_AGENT`, `FBLS_DATA` (mặc định `/data`).
+Biến môi trường: `FBWEB_PAGE_ID`, `FBWEB_ACCOUNT`, `FBWEB_TOKEN`, `FBWEB_URL` (như fbweb-browser), `FBLS_DRY_RUN`, `FBLS_DEBUG`, `FBLS_PAGE_NAME` (dự phòng), `FBLS_USER_AGENT`, `FBLS_DATA` (mặc định `/data`), `FBLS_STATE` (tên file cursor trong `FBLS_DATA`, mặc định `state.json`).
 
 Image `scratch` khoảng 12 MB, giới hạn RAM 64 MiB (`GOMEMLIMIT` 40 MiB).
+
+## 🧪 Trang thử
+
+Trang thử `1364936880042409` (tài khoản quản lý: `default`; khách thử là `acc2`) có inbox riêng "Fanpage Web - vetgo-test" trong Libredesk (`FBWEB_PAGES` trên server3). Service `ls-test` trong `docker-compose.yml` nghe Trang này bằng chung cookie với `ls`, cursor riêng (`FBLS_STATE=state-test.json`). Chỉ bật khi thử rồi tắt, vì hai socket chạy trên cùng một phiên; tắt thì fb-bridge-web hiện `vetgo-test` là `dropped`, không phải sự cố.
+
+```bash
+docker compose --profile test up -d ls-test   # bật
+docker compose --profile test stop ls-test    # tắt
+```
+
+Số trên URL `profile.php?id=` của Trang không phải `asset_id` của Business Suite; lấy `asset_id` trên URL Hộp thư.
 
 ## ⚠️ Chưa biết, cần thử thật
 
