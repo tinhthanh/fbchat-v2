@@ -111,12 +111,12 @@ func (f *Forwarder) Heartbeat(ctx context.Context) {
 
 // post trả mã HTTP, 0 nếu lỗi mạng.
 func (f *Forwarder) post(ctx context.Context, path string, extra map[string]any) int {
-	status, _ := f.postRead(ctx, path, extra)
+	status, _ := f.postRead(ctx, path, extra, 64<<10)
 	return status
 }
 
-// postRead như post nhưng trả cả thân (tối đa 64 KiB), cho /outbox.
-func (f *Forwarder) postRead(ctx context.Context, path string, extra map[string]any) (int, []byte) {
+// postRead như post nhưng trả cả thân (tối đa limit byte), cho /outbox.
+func (f *Forwarder) postRead(ctx context.Context, path string, extra map[string]any, limit int64) (int, []byte) {
 	body := map[string]any{"account": f.Account, "page_id": f.PageID, "page_name": f.PageName(), "version": ingestVersion}
 	for k, v := range extra {
 		body[k] = v
@@ -135,7 +135,7 @@ func (f *Forwarder) postRead(ctx context.Context, path string, extra map[string]
 	if err != nil {
 		return 0, nil
 	}
-	out, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	out, _ := io.ReadAll(io.LimitReader(resp.Body, limit))
 	_, _ = io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
 	return resp.StatusCode, out

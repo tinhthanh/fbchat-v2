@@ -95,6 +95,7 @@ func check(ctx context.Context, httpClient *req.Client, jar *CookieJar, cfg Conf
 	fmt.Printf("version: %d chữ số\n", len(info.Version))
 	fmt.Printf("cursor db %s: %d ký tự\n", lsDatabase, len(info.Cursor))
 	fmt.Printf("region: %s\n", info.RegionHint)
+	fmt.Printf("fb_dtsg: %d ký tự, lsd: %d ký tự\n", len(info.DTSG), len(info.LSD))
 	fmt.Printf("contacts: %d, có tên Trang: %v\n", len(info.Contacts), info.Contacts[cfg.PageID] != "")
 	return nil
 }

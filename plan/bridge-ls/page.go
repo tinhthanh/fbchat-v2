@@ -32,6 +32,10 @@ type PageInfo struct {
 	SyncParams string // sync_params của preload db 205 (locale, bloks_version), cho request type 1
 	RegionHint string
 	Contacts   map[string]string
+	// DTSG, LSD: token form của trang, chỉ cho upload tệp (upload.go). Là bí mật
+	// phiên: không ghi log, không lưu file.
+	DTSG string
+	LSD  string
 }
 
 var errLoggedOut = errors.New("facebook session is logged out")
@@ -39,7 +43,7 @@ var errLoggedOut = errors.New("facebook session is logged out")
 var jsonScriptRe = regexp.MustCompile(`(?s)<script type="application/json"[^>]*>(.*?)</script>`)
 
 // Chỉ giải mã script có một trong các dấu này: trang khoảng 2,8 MB, phần lớn không cần.
-var scriptMarkers = []string{"DGWWebConfig", "CurrentUserInitialData", "executeFirstBlockForSyncTransactionV4", "setRegionHint", `database\`}
+var scriptMarkers = []string{"DGWWebConfig", "CurrentUserInitialData", "DTSGInitialData", `"LSD"`, "executeFirstBlockForSyncTransactionV4", "setRegionHint", `database\`}
 
 type pageScan struct {
 	info       PageInfo
@@ -133,6 +137,14 @@ func (s *pageScan) config(name string, obj map[string]any) {
 	case "CurrentUserInitialData":
 		if id, ok := obj["USER_ID"].(string); ok {
 			s.info.UserID = id
+		}
+	case "DTSGInitialData":
+		if t, ok := obj["token"].(string); ok {
+			s.info.DTSG = t
+		}
+	case "LSD":
+		if t, ok := obj["token"].(string); ok {
+			s.info.LSD = t
 		}
 	}
 }

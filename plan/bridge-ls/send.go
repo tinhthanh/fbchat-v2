@@ -8,7 +8,8 @@ package main
 //
 // fbweb-ls hỏi hàng đợi gửi của fb-bridge-web (POST /outbox, chờ tối đa vài chục
 // giây, qua SSH tunnel sẵn có) rồi báo kết quả (POST /outbox/result). Chỉ chạy
-// khi FBLS_SEND=1. Chỉ gửi chữ (có thể trả lời một tin); tệp chưa hỗ trợ.
+// khi FBLS_SEND=1. Chữ (có thể trả lời một tin) và tệp (upload.go, tải lên trước,
+// mỗi tệp một task send_type 3 trong cùng request).
 
 import (
 	"context"
@@ -25,6 +26,7 @@ import (
 )
 
 const (
+	maxOutboxBody = 96 << 20 // tin kèm tệp (base64)
 	sendTaskLabel = "46"
 	sendSource    = 4456448          // source của tin chữ gửi từ Business Suite
 	sendTimeout   = 15 * time.Second // fb-bridge-web chờ kết quả 19 giây
@@ -32,33 +34,45 @@ const (
 
 // outJob: một tin trong hàng đợi gửi của fb-bridge-web.
 type outJob struct {
-	ID       string `json:"id"`
-	ThreadID string `json:"thread_id"`
-	Text     string `json:"text"`
-	ReplyTo  string `json:"reply_to,omitempty"`
-	Otid     string `json:"otid"`
+	ID       string    `json:"id"`
+	ThreadID string    `json:"thread_id"`
+	Text     string    `json:"text"`
+	ReplyTo  string    `json:"reply_to,omitempty"`
+	Otid     string    `json:"otid"` // của task chữ
+	Files    []outFile `json:"files,omitempty"`
+}
+
+// outFile: tệp nhân viên gửi (base64 trong JSON), mỗi tệp một otid riêng để
+// fb-bridge-web nhận ra tin quay lại trên socket.
+type outFile struct {
+	Name        string `json:"name"`
+	ContentType string `json:"content_type"`
+	Data        []byte `json:"data"`
+	Otid        string `json:"otid"`
 }
 
 // outResult: OK kèm mid; hoặc Error. Retry: chắc chắn chưa gửi, gửi lại an toàn.
 // Unknown: đã đưa lên socket mà không có xác nhận, có thể đã tới khách.
 type outResult struct {
-	ID      string `json:"id"`
-	OK      bool   `json:"ok"`
-	Mid     string `json:"mid,omitempty"`
-	Error   string `json:"error,omitempty"`
-	Retry   bool   `json:"retry,omitempty"`
-	Unknown bool   `json:"unknown,omitempty"`
+	ID      string   `json:"id"`
+	OK      bool     `json:"ok"`
+	Mid     string   `json:"mid,omitempty"`  // mid đầu tiên
+	Mids    []string `json:"mids,omitempty"` // mỗi tệp rồi chữ, theo thứ tự gửi
+	Error   string   `json:"error,omitempty"`
+	Retry   bool     `json:"retry,omitempty"`
+	Unknown bool     `json:"unknown,omitempty"`
 }
 
 type sendTask struct {
-	ThreadID       int64          `json:"thread_id"`
-	Otid           string         `json:"otid"`
-	Source         int64          `json:"source"`
-	SendType       int            `json:"send_type"`
-	SyncGroup      json.Number    `json:"sync_group"`
-	MarkThreadRead int            `json:"mark_thread_read"`
-	Text           string         `json:"text"`
-	ReplyMetadata  *replyMetadata `json:"reply_metadata,omitempty"`
+	ThreadID        int64          `json:"thread_id"`
+	Otid            string         `json:"otid"`
+	Source          int64          `json:"source"`
+	SendType        int            `json:"send_type"`
+	SyncGroup       json.Number    `json:"sync_group"`
+	MarkThreadRead  int            `json:"mark_thread_read"`
+	Text            *string        `json:"text"` // null với task tệp
+	AttachmentFBIDs []int64        `json:"attachment_fbids,omitempty"`
+	ReplyMetadata   *replyMetadata `json:"reply_metadata,omitempty"`
 }
 
 type replyMetadata struct {
@@ -112,7 +126,12 @@ func (l *Listener) sendLoop(ctx context.Context) {
 func (l *Listener) sendJob(ctx context.Context, j outJob) outResult {
 	res := outResult{ID: j.ID}
 	thread, err := strconv.ParseInt(j.ThreadID, 10, 64)
-	if err != nil || thread <= 0 || strings.TrimSpace(j.Text) == "" || j.Otid == "" {
+	valid := err == nil && thread > 0 && (strings.TrimSpace(j.Text) == "" || j.Otid != "") &&
+		(strings.TrimSpace(j.Text) != "" || len(j.Files) > 0)
+	for _, f := range j.Files {
+		valid = valid && f.Otid != ""
+	}
+	if !valid {
 		res.Error = "Yêu cầu gửi không hợp lệ (thiếu hội thoại, nội dung hoặc otid)."
 		return res
 	}
@@ -124,7 +143,18 @@ func (l *Listener) sendJob(ctx context.Context, j outJob) outResult {
 		res.Error, res.Retry = "fbweb-ls chưa kết nối Facebook.", true
 		return res
 	}
-	payload, err := l.sendRequest(thread, j)
+	// Tải tệp lên trước: lỗi ở đây nghĩa là chưa gửi gì tới khách.
+	fbids := make([]int64, 0, len(j.Files))
+	for _, f := range j.Files {
+		id, err := l.upload(ctx, f)
+		if err != nil {
+			res.Error = fmt.Sprintf("Không tải được tệp «%s» lên Facebook: %s. Chưa gửi gì tới khách.", f.Name, err)
+			return res
+		}
+		fbids = append(fbids, id)
+	}
+	tasks := tasksFor(thread, j, fbids)
+	payload, err := l.sendRequest(j.ThreadID, tasks)
 	if err != nil {
 		res.Error = "Không tạo được yêu cầu gửi."
 		return res
@@ -142,37 +172,46 @@ func (l *Listener) sendJob(ctx context.Context, j outJob) outResult {
 		return res
 	}
 	_, calls, _ := decodeFrame(resp)
+	mids := map[string]string{}
 	for _, c := range calls {
-		if c.Name == "replaceOptimsiticMessage" && str(c.Args, 0) == j.Otid && str(c.Args, 1) != "" {
-			res.OK, res.Mid = true, str(c.Args, 1)
-			return res
+		if c.Name == "replaceOptimsiticMessage" && str(c.Args, 1) != "" {
+			mids[str(c.Args, 0)] = str(c.Args, 1)
 		}
 	}
-	names := procedureNames(calls)
-	res.Error, res.Unknown = fmt.Sprintf("Facebook không xác nhận đã gửi (%s). Xem trong Business Suite trước khi gửi lại.", names), true
+	for _, t := range tasks {
+		if mid := mids[t.Otid]; mid != "" {
+			res.Mids = append(res.Mids, mid)
+		}
+	}
+	switch {
+	case len(res.Mids) == len(tasks):
+		res.OK, res.Mid = true, res.Mids[0]
+	case len(res.Mids) > 0:
+		res.Mid, res.Unknown = res.Mids[0], true
+		res.Error = fmt.Sprintf("Facebook chỉ xác nhận %d/%d phần của tin (tệp gửi trước, chữ sau). Xem trong Business Suite trước khi gửi lại.", len(res.Mids), len(tasks))
+	default:
+		res.Error, res.Unknown = fmt.Sprintf("Facebook không xác nhận đã gửi (%s). Xem trong Business Suite trước khi gửi lại.", procedureNames(calls)), true
+	}
 	return res
 }
 
-// sendRequest dựng request type 3 với một task 46, thứ tự khoá như trang gửi.
-func (l *Listener) sendRequest(thread int64, j outJob) ([]byte, error) {
-	t := sendTask{ThreadID: thread, Otid: j.Otid, Source: sendSource, SendType: 1,
-		SyncGroup: json.Number(lsDatabase), MarkThreadRead: 1, Text: j.Text}
-	if j.ReplyTo != "" {
-		t.ReplyMetadata = &replyMetadata{ReplySourceID: j.ReplyTo, ReplySourceType: 1}
-	}
-	inner, err := json.Marshal(t)
-	if err != nil {
-		return nil, err
-	}
+// sendRequest dựng request type 3 với các task 46, thứ tự khoá như trang gửi.
+func (l *Listener) sendRequest(queue string, tasks []sendTask) ([]byte, error) {
+	data := make([]taskData, 0, len(tasks))
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.info == nil {
 		return nil, errors.New("no inbox page info")
 	}
-	l.taskID++
-	outer, err := json.Marshal(taskPayload{EpochID: epochID(), VersionID: l.info.Version, Tasks: []taskData{{
-		Label: sendTaskLabel, Payload: string(inner), QueueName: j.ThreadID, TaskID: l.taskID,
-	}}})
+	for _, t := range tasks {
+		inner, err := json.Marshal(t)
+		if err != nil {
+			return nil, err
+		}
+		l.taskID++
+		data = append(data, taskData{Label: sendTaskLabel, Payload: string(inner), QueueName: queue, TaskID: l.taskID})
+	}
+	outer, err := json.Marshal(taskPayload{EpochID: epochID(), VersionID: l.info.Version, Tasks: data})
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +237,7 @@ func procedureNames(calls []call) string {
 
 // Poll hỏi một tin cần gửi; nil khi hết thời gian chờ mà không có tin.
 func (f *Forwarder) Poll(ctx context.Context) (*outJob, error) {
-	status, body := f.postRead(ctx, "/outbox", nil)
+	status, body := f.postRead(ctx, "/outbox", nil, maxOutboxBody)
 	switch status {
 	case http.StatusOK:
 		var j outJob

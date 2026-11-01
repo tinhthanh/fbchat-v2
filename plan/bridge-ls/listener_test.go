@@ -403,16 +403,17 @@ func TestGapRecoveryFromSnapshot(t *testing.T) {
 }
 
 // taskReply trả lời task gửi tin như server thật (bắt frame 01/11/2026):
-// replaceOptimsiticMessage [otid, mid]; tin chữ "không xác nhận" thì không có.
+// replaceOptimsiticMessage [otid, mid] cho từng task; task chữ "không xác nhận" thì không.
 func taskReply(req lsRequest) []byte {
 	var tp taskPayload
 	_ = json.Unmarshal([]byte(req.Payload), &tp)
-	var st sendTask
-	if len(tp.Tasks) > 0 {
-		_ = json.Unmarshal([]byte(tp.Tasks[0].Payload), &st)
-	}
 	step := []any{1, []any{5, "taskExists", []any{19, "1"}}, []any{5, "removeTask", []any{19, "1"}}}
-	if st.Text != "không xác nhận" {
+	for _, t := range tp.Tasks {
+		var st sendTask
+		_ = json.Unmarshal([]byte(t.Payload), &st)
+		if st.Text != nil && *st.Text == "không xác nhận" {
+			continue
+		}
 		step = append(step, []any{5, "replaceOptimsiticMessage", st.Otid, "mid.sent-" + st.Otid})
 	}
 	payload, _ := json.Marshal(map[string]any{"step": step})
@@ -421,10 +422,46 @@ func taskReply(req lsRequest) []byte {
 }
 
 func TestSendEndToEndFakeGateway(t *testing.T) {
-	jobs := make(chan outJob, 2)
+	jobs := make(chan outJob, 4)
 	jobs <- outJob{ID: "j1", ThreadID: "42", Text: "chào khách", ReplyTo: "mid.q", Otid: "7522540858541379169"}
 	jobs <- outJob{ID: "j2", ThreadID: "42", Text: "không xác nhận", Otid: "7522540858541379170"}
-	results := make(chan outResult, 2)
+	// Ảnh và PDF kèm chữ: tải lên trước, rồi một request với ba task (tệp trước, chữ sau).
+	jobs <- outJob{ID: "j3", ThreadID: "42", Text: "gửi tệp", Otid: "300", Files: []outFile{
+		{Name: "anh.png", ContentType: "image/png", Data: []byte("PNG"), Otid: "301"},
+		{Name: "bao-gia.pdf", ContentType: "application/pdf", Data: []byte("%PDF"), Otid: "302"},
+	}}
+	// Facebook từ chối tải lên: chưa gửi gì, không có task.
+	jobs <- outJob{ID: "j4", ThreadID: "42", Otid: "400", Files: []outFile{{Name: "hong.exe", ContentType: "application/x-msdownload", Data: []byte("MZ"), Otid: "401"}}}
+	type upload struct {
+		query    url.Values
+		field    string
+		filename string
+		ctype    string
+		data     string
+		cookie   string
+	}
+	uploads := make(chan upload, 4)
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseMultipartForm(1 << 20)
+		var u upload
+		u.query, u.cookie = r.URL.Query(), r.Header.Get("Cookie")
+		for field, fhs := range r.MultipartForm.File {
+			f, _ := fhs[0].Open()
+			b, _ := io.ReadAll(f)
+			u.field, u.filename, u.ctype, u.data = field, fhs[0].Filename, fhs[0].Header.Get("Content-Type"), string(b)
+		}
+		uploads <- u
+		switch u.filename {
+		case "anh.png":
+			io.WriteString(w, `for (;;);{"__ar":1,"payload":{"uploadID":null,"metadata":{"0":{"image_id":"1718704036626264","filename":"anh.png","fbid":"1718704036626264"}}}}`)
+		case "bao-gia.pdf":
+			io.WriteString(w, `for (;;);{"__ar":1,"payload":{"uploadID":null,"metadata":{"0":{"file_id":1109895998427739,"filename":"bao-gia.pdf"}}}}`)
+		default:
+			io.WriteString(w, `for (;;);{"__ar":1,"error":1545012,"errorSummary":"Loại tệp không được hỗ trợ"}`)
+		}
+	}))
+	defer up.Close()
+	results := make(chan outResult, 4)
 	ingest := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/outbox":
@@ -447,6 +484,8 @@ func TestSendEndToEndFakeGateway(t *testing.T) {
 
 	l := testListener(t, ingest.URL, false)
 	l.cfg.Send = true
+	l.uploadURL = up.URL
+	l.info.DTSG, l.info.LSD = "dtsg-token", "lsd-token"
 	l.wsURL = "ws" + strings.TrimPrefix(srv.URL, "http")
 	l.ws = &http.Client{Transport: &browserTransport{base: http.DefaultTransport, ua: defaultUserAgent, pageID: testPageID, regionHint: l.regionHint}}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -455,7 +494,7 @@ func TestSendEndToEndFakeGateway(t *testing.T) {
 	defer func() { cancel(); <-done }()
 
 	got := map[string]outResult{}
-	for len(got) < 2 {
+	for len(got) < 4 {
 		select {
 		case r := <-results:
 			got[r.ID] = r
@@ -471,10 +510,42 @@ func TestSendEndToEndFakeGateway(t *testing.T) {
 		t.Fatalf("j2 %+v", r)
 	}
 
+	if r := got["j3"]; !r.OK || strings.Join(r.Mids, ",") != "mid.sent-301,mid.sent-302,mid.sent-300" || r.Mid != "mid.sent-301" {
+		t.Fatalf("j3 %+v", r)
+	}
+	if r := got["j4"]; r.OK || r.Unknown || r.Retry || !strings.Contains(r.Error, "Loại tệp không được hỗ trợ") || !strings.Contains(r.Error, "Chưa gửi gì") {
+		t.Fatalf("j4 %+v", r)
+	}
+	close(uploads)
+	var ups []upload
+	for u := range uploads {
+		ups = append(ups, u)
+	}
+	if len(ups) != 3 || ups[0].filename != "anh.png" || ups[0].ctype != "image/png" || ups[0].data != "PNG" || ups[0].field != "upload_1024" ||
+		ups[1].filename != "bao-gia.pdf" || ups[1].field != "upload_1025" {
+		t.Fatalf("uploads %+v", ups)
+	}
+	q := ups[0].query
+	if q.Get("request_user_id") != testPageID || q.Get("__user") != "100012345678901" || q.Get("__a") != "1" ||
+		q.Get("fb_dtsg") != "dtsg-token" || q.Get("lsd") != "lsd-token" || q.Get("jazoest") != jazoest("dtsg-token") ||
+		!strings.Contains(ups[0].cookie, "xs=secret-xs") {
+		t.Fatalf("upload query %v cookie set %v", q, ups[0].cookie != "")
+	}
+
 	gw.mu.Lock()
 	defer gw.mu.Unlock()
-	if len(gw.tasks) != 2 {
+	if len(gw.tasks) != 3 {
 		t.Fatalf("tasks %+v", gw.tasks)
+	}
+	var fileReq taskPayload
+	_ = json.Unmarshal([]byte(gw.tasks[2].Payload), &fileReq)
+	if len(fileReq.Tasks) != 3 {
+		t.Fatalf("file request %+v", fileReq)
+	}
+	wantFile := `{"thread_id":42,"otid":"301","source":0,"send_type":3,"sync_group":205,"mark_thread_read":0,"text":null,"attachment_fbids":[1718704036626264]}`
+	if fileReq.Tasks[0].Payload != wantFile || !strings.Contains(fileReq.Tasks[1].Payload, `"attachment_fbids":[1109895998427739]`) ||
+		!strings.Contains(fileReq.Tasks[2].Payload, `"send_type":1`) || !strings.Contains(fileReq.Tasks[2].Payload, `"text":"gửi tệp"`) {
+		t.Fatalf("file tasks %+v", fileReq.Tasks)
 	}
 	req := gw.tasks[0]
 	var tp taskPayload

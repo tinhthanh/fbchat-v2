@@ -76,6 +76,8 @@ type Listener struct {
 	requestID   int // chung cho request đồng bộ và task gửi tin, như trang
 	syncReq     int // request đồng bộ gần nhất: chỉ phản hồi của nó quyết định đã theo kịp chưa
 	taskID      int
+	uploadSeq   int
+	uploadURL   string // uploadURL; test đổi sang server giả
 	sock        *dgw.Socket
 	stream      *dgw.PersistentStream
 	streamReady chan struct{} // đóng khi stream của kết nối hiện tại đã có (onConnect)
@@ -90,7 +92,7 @@ type Listener struct {
 }
 
 func NewListener(cfg Config, jar *CookieJar, httpClient *req.Client, log *slog.Logger) *Listener {
-	l := &Listener{cfg: cfg, log: log, jar: jar, http: httpClient, wsURL: lsURL, contacts: map[string]string{}, seen: newDedupe(2000)}
+	l := &Listener{cfg: cfg, log: log, jar: jar, http: httpClient, wsURL: lsURL, uploadURL: uploadURL, contacts: map[string]string{}, seen: newDedupe(2000)}
 	l.liveUntilMs = loadState(l.statePath()).LiveUntilMs
 	l.ws = newWebsocketClient(cfg.UserAgent, cfg.PageID, l.regionHint)
 	return l
