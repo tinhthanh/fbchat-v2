@@ -51,7 +51,7 @@ Hệ quả: mỗi lần nối lại là một ảnh chụp lịch sử. Ảnh ch
 2. Mở socket DGW (TLS giả Chrome bằng uTLS, User-Agent và client hints đúng Chromium 142 Linux của fbweb-browser), mở một stream db 205 `type 2` với cursor. Server đòi đồng bộ lại thì gửi `type 1` (tối đa 2 lần), rồi `type 2` với `nextCursor` cho tới khi theo kịp (tối đa 10 lần).
 3. Mỗi frame: cập nhật cursor (`data/state.json`), parse sự kiện (`lsparse.go`, bản Go của `parseCalls` trong `bs-inbox-listener.js`), khử trùng, tải file đính kèm, `POST /ingest`. Heartbeat 30 giây khi stream còn mở.
 4. Rớt socket: nối lại với cursor đang có (nhận tiếp tin bị lỡ), chờ 2 s đến 5 phút. Hỏng ngay khi nối hoặc quá 6 giờ thì tải lại trang trước. Chạy lại tiến trình: dùng cursor đã lưu nếu chưa quá 12 giờ. `handleSyncFailure` thì lấy cursor mới của trang.
-5. Hết phiên (trang chuyển sang đăng nhập hoặc `USER_ID` = 0): ghi lỗi, 30 phút thử lại một lần, không heartbeat nên fb-bridge-web báo `dropped`. Đăng nhập lại trong fbweb-browser (`FBWEB_MODE=login`) rồi xuất lại cookie.
+5. Hết phiên (trang chuyển sang đăng nhập hoặc `USER_ID` = 0): ghi lỗi, 30 phút thử lại một lần, không heartbeat nên fb-bridge-web báo `dropped`. Đăng nhập lại trong fbweb-browser (`FBWEB_MODE=login`) rồi xuất lại cookie; từng bước ở `omnichannel/docs/OPERATIONS.md`, mục "Fanpage Web: đăng nhập lại".
 
 | File | Vai trò |
 |---|---|
