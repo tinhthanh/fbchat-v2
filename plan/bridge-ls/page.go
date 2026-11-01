@@ -36,6 +36,8 @@ type PageInfo struct {
 	// phiên: không ghi log, không lưu file.
 	DTSG string
 	LSD  string
+	// Scripts: tệp JS công khai của trang, để tìm lại query khi Facebook đổi (pagesquery.go).
+	Scripts []string
 }
 
 var errLoggedOut = errors.New("facebook session is logged out")
@@ -234,6 +236,7 @@ func fetchParsedHop(ctx context.Context, client *req.Client, jar *CookieJar, ua 
 	if err != nil {
 		return nil, fmt.Errorf("%w (%s)", err, describeHTML(resp.Bytes()))
 	}
+	info.Scripts = scriptURLs(resp.Bytes())
 	return info, nil
 }
 

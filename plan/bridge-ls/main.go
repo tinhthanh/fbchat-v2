@@ -71,7 +71,7 @@ func run(log *slog.Logger) error {
 		return check(ctx, httpClient, jar, cfg)
 	}
 	if len(os.Args) > 1 && os.Args[1] == "pages" {
-		pages, err := listPages(ctx, httpClient, jar, cfg.UserAgent)
+		pages, err := listPages(ctx, httpClient, newDownloadClient(), jar, cfg.UserAgent, nil)
 		if err != nil {
 			return err
 		}

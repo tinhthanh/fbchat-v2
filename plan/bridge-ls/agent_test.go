@@ -54,7 +54,7 @@ func TestParsePagesErrors(t *testing.T) {
 }
 
 func TestPagesVariablesExtra(t *testing.T) {
-	v := pagesVariables("100", map[string]any{"__relay_internal__pv__X": true})
+	v := pagesVariables("100", []string{"__relay_internal__pv__X"})
 	if v["firstLevelScopeId"] != "100" || v["__relay_internal__pv__X"] != true || v["contextUri"] != inboxURL {
 		t.Fatalf("variables = %v", v)
 	}

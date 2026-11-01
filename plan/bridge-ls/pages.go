@@ -28,6 +28,8 @@ const (
 	graphqlURL     = "https://business.facebook.com/api/graphql/"
 )
 
+var errGraphQLNetwork = errors.New("lỗi mạng")
+
 // PageItem: một Trang trong danh sách. Picture là URL fbcdn có chữ ký, hết hạn sau vài ngày.
 type PageItem struct {
 	ID      string `json:"id"`
@@ -37,13 +39,16 @@ type PageItem struct {
 
 // Biến relay provider của query: thiếu thì server báo missing_required_variable_value
 // mà không nói tên. Tên lấy từ module JS công khai "<query>$Parameters" (01/11/2026);
-// trang gửi true. Nếu server có lúc nêu tên biến thiếu khác thì gửi lại một lần với nó.
+// trang gửi true. Facebook đổi bản phát hành thì doc_id và tên biến có thể đổi:
+// listPages tự tìm lại trong JS của trang (pagesquery.go).
 const portfolioProvider = "__relay_internal__pv__IsBusinessPortfolioOverviewLinkEnabledrelayprovider"
 
 var missingVarRe = regexp.MustCompile(`__relay_internal__pv__[A-Za-z0-9_]+`)
 
-// listPages tải Hộp thư một lần lấy token form, rồi hỏi danh sách Trang.
-func listPages(ctx context.Context, client *req.Client, jar *CookieJar, ua UserAgent) ([]PageItem, error) {
+// listPages tải Hộp thư một lần lấy token form, rồi hỏi danh sách Trang. Query hỏng
+// (không phải hết phiên hay lỗi mạng) thì tìm lại doc_id và biến trong JS của trang
+// một lần (dl: client tải tệp công khai, không gửi cookie); cache nhớ bản tìm được.
+func listPages(ctx context.Context, client, dl *req.Client, jar *CookieJar, ua UserAgent, cache *queryCache) ([]PageItem, error) {
 	info, err := fetchSession(ctx, client, jar, ua)
 	if err != nil {
 		return nil, err
@@ -51,10 +56,31 @@ func listPages(ctx context.Context, client *req.Client, jar *CookieJar, ua UserA
 	if info.UserID != jar.Get("c_user") {
 		return nil, errors.New("business page USER_ID does not match the c_user cookie")
 	}
-	docID := env("FBLS_PAGES_DOC_ID", pagesDocID)
-	extra := map[string]any{}
+	q := cache.get()
+	pages, err := queryPages(ctx, client, jar, ua, info, q)
+	if err == nil || errors.Is(err, errLoggedOut) || errors.Is(err, errGraphQLNetwork) || dl == nil {
+		return pages, err
+	}
+	found, derr := discoverPagesQuery(ctx, dl, ua, info.Scripts)
+	if derr != nil {
+		return nil, fmt.Errorf("%w (không tìm lại được query trong JS của trang: %v)", err, derr)
+	}
+	if found.DocID == q.DocID && sameStrings(found.Providers, q.Providers) {
+		return nil, err
+	}
+	pages, err2 := queryPages(ctx, client, jar, ua, info, found)
+	if err2 != nil {
+		return nil, fmt.Errorf("%w (doc_id mới %s cũng lỗi: %v)", err, found.DocID, err2)
+	}
+	cache.set(found)
+	return pages, nil
+}
+
+// queryPages gửi query; server nêu tên biến thiếu thì gửi lại một lần với biến đó.
+func queryPages(ctx context.Context, client *req.Client, jar *CookieJar, ua UserAgent, info *PageInfo, q pagesQuery) ([]PageItem, error) {
+	providers := append([]string(nil), q.Providers...)
 	for attempt := 0; ; attempt++ {
-		raw, err := postGraphQL(ctx, client, jar, ua, info, pagesQueryName, docID, pagesVariables(info.UserID, extra))
+		raw, err := postGraphQL(ctx, client, jar, ua, info, pagesQueryName, q.DocID, pagesVariables(info.UserID, providers))
 		if err != nil {
 			return nil, err
 		}
@@ -66,13 +92,11 @@ func listPages(ctx context.Context, client *req.Client, jar *CookieJar, ua UserA
 		if attempt > 0 || len(names) == 0 {
 			return nil, err
 		}
-		for _, n := range names {
-			extra[n] = true
-		}
+		providers = append(providers, names...)
 	}
 }
 
-func pagesVariables(userID string, extra map[string]any) map[string]any {
+func pagesVariables(userID string, providers []string) map[string]any {
 	v := map[string]any{
 		"businessToolName":  "MBS_INBOX",
 		"contextUri":        inboxURL,
@@ -84,10 +108,9 @@ func pagesVariables(userID string, extra map[string]any) map[string]any {
 		"fetchNumberForBusinessChildrenScopes": 40, "fetchNumberForPersonalChildrenScopes": 40,
 		"isPersonalAccount": true, "scopeIDs": []string{userID},
 		"shouldFetchBusinessRecommendationInfo": false,
-		portfolioProvider:                       true,
 	}
-	for k, x := range extra {
-		v[k] = x
+	for _, p := range providers {
+		v[p] = true
 	}
 	return v
 }
@@ -115,7 +138,7 @@ func postGraphQL(ctx context.Context, client *req.Client, jar *CookieJar, ua Use
 		SetBodyString(form.Encode()).
 		Post(graphqlURL)
 	if err != nil {
-		return nil, fmt.Errorf("%s: lỗi mạng", name)
+		return nil, fmt.Errorf("%s: %w", name, errGraphQLNetwork)
 	}
 	defer resp.Body.Close()
 	jar.Update(resp.Header)

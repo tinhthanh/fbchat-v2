@@ -65,6 +65,7 @@ Hệ quả: mỗi lần nối lại là một ảnh chụp lịch sử. Ảnh ch
 | `react.go` | Thả, gỡ cảm xúc (task 29), sticker Like |
 | `store.go` | `data/cookies.json`, `data/state.json`, ghi tạm rồi đổi tên, quyền 600 |
 | `pages.go` | Liệt kê Trang của phiên (GraphQL của ô chọn Trang) |
+| `pagesquery.go` | Tìm lại `doc_id` và biến của query danh sách Trang trong JS công khai khi Facebook đổi |
 | `agent.go` | Chế độ agent: nhiều phiên, nhiều Trang, cấu hình từ fb-bridge-web |
 | `export-cookies.sh` | Lấy cookie từ fbweb-browser qua CDP |
 
@@ -122,7 +123,8 @@ Cho D18 của omnichannel (agent liệt kê Trang để admin chọn). Bắt b�
 
 - Tải `latest/inbox/all/` không có `asset_id` (Business Suite chuyển sang Trang mặc định, đi theo một lần) để lấy `fb_dtsg`, `lsd`, `USER_ID`.
 - GraphQL `POST business.facebook.com/api/graphql/`, `fb_api_req_friendly_name=NorthStarBusinessUnifiedScopingSelectorFirstAndZeroLevelScopesSectionAllZeroLevelScopesQuery`, `doc_id=37857269907251700` (`FBLS_PAGES_DOC_ID` để thay). Biến chính: `businessToolName "MBS_INBOX"`, `contextUri` là URL Hộp thư, `firstLevelScopeId` và `scopeIDs [..]` là id người dùng (`c_user`), `isPersonalAccount true`, `countLimit 201`, `fetchNumberForPersonalChildrenScopes 40`.
-- Biến bắt buộc `__relay_internal__pv__IsBusinessPortfolioOverviewLinkEnabledrelayprovider: true`. Thiếu nó server chỉ trả `missing_required_variable_value`, không nói tên biến; tên lấy từ module `<query>$Parameters` (`providedVariables`) trong JS `static.xx.fbcdn.net` mà trang Hộp thư nạp. `doc_id` cũng nằm ở module `<query>_facebookRelayOperation`. Đổi bản phát hành thì tìm lại hai module này.
+- Biến bắt buộc `__relay_internal__pv__IsBusinessPortfolioOverviewLinkEnabledrelayprovider: true`. Thiếu nó server chỉ trả `missing_required_variable_value`, không nói tên biến; tên lấy từ module `<query>$Parameters` (`providedVariables`) trong JS `static.xx.fbcdn.net` mà trang Hộp thư nạp. `doc_id` cũng nằm ở module `<query>_facebookRelayOperation`.
+- **Tự tìm lại** (`pagesquery.go`): query lỗi (không phải hết phiên hay lỗi mạng) thì agent tải các tệp JS công khai mà trang Hộp thư liệt kê (không gửi cookie, 8 luồng, dừng khi thấy đủ hai module), thử lại với `doc_id` và biến mới, đúng thì lưu `FBLS_DATA/pages-query.json` để lần sau dùng ngay. Thử trên JS thật 01/11/2026: khoảng 1.000 tệp, tìm thấy sau 32 giây. Không tìm được thì lỗi hiện ở phiên trên trang Chọn Trang, kèm lý do.
 - Phản hồi: `data.viewer.meta_business_scoping.personal_scopes {count, page_info, edges[].node{scope_id, scope_name, scope_type "PAGE", scope_profile_picture{uri}}}`. `scope_id` chính là `asset_id`. Thử thật 01/11/2026 bằng `fbweb-ls pages` với phiên `default`: đủ 5 Trang, khớp `count`.
 - Trang thuộc portfolio doanh nghiệp nằm ở `business_scopes` của `NorthStarBusinessUnifiedScopingSelectorPopoverContainerAllFirstLevelScopesQuery` (`doc_id=28183223691347905`); tài khoản này có `count 0` nên chưa làm.
 

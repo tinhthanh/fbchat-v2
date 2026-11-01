@@ -133,8 +133,9 @@ func NewAgent(cfg AgentConfig, log *slog.Logger) *Agent {
 		sync:   &http.Client{Timeout: syncWaitLimit},
 		logins: map[string]*agentLogin{}, running: map[string]*runningPage{},
 	}
+	cache := &queryCache{path: filepath.Join(cfg.DataDir, "pages-query.json")}
 	a.list = func(ctx context.Context, jar *CookieJar) ([]PageItem, error) {
-		return listPages(ctx, a.http, jar, a.cfg.UserAgent)
+		return listPages(ctx, a.http, a.download, jar, a.cfg.UserAgent, cache)
 	}
 	a.newRunner = a.listenerFor
 	return a
