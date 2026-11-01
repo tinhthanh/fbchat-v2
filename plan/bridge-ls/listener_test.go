@@ -409,6 +409,10 @@ func taskReply(req lsRequest) []byte {
 	_ = json.Unmarshal([]byte(req.Payload), &tp)
 	step := []any{1, []any{5, "taskExists", []any{19, "1"}}, []any{5, "removeTask", []any{19, "1"}}}
 	for _, t := range tp.Tasks {
+		if t.Label == reactTaskLabel {
+			step = append(step, []any{5, "replaceOptimisticReaction", []any{19, "1"}})
+			continue
+		}
 		var st sendTask
 		_ = json.Unmarshal([]byte(t.Payload), &st)
 		if st.Text != nil && *st.Text == "không xác nhận" {
@@ -422,7 +426,7 @@ func taskReply(req lsRequest) []byte {
 }
 
 func TestSendEndToEndFakeGateway(t *testing.T) {
-	jobs := make(chan outJob, 4)
+	jobs := make(chan outJob, 6)
 	jobs <- outJob{ID: "j1", ThreadID: "42", Text: "chào khách", ReplyTo: "mid.q", Otid: "7522540858541379169"}
 	jobs <- outJob{ID: "j2", ThreadID: "42", Text: "không xác nhận", Otid: "7522540858541379170"}
 	// Ảnh và PDF kèm chữ: tải lên trước, rồi một request với ba task (tệp trước, chữ sau).
@@ -432,6 +436,8 @@ func TestSendEndToEndFakeGateway(t *testing.T) {
 	}}
 	// Facebook từ chối tải lên: chưa gửi gì, không có task.
 	jobs <- outJob{ID: "j4", ThreadID: "42", Otid: "400", Files: []outFile{{Name: "hong.exe", ContentType: "application/x-msdownload", Data: []byte("MZ"), Otid: "401"}}}
+	jobs <- outJob{ID: "j5", Kind: "react", ThreadID: "42", MessageID: "mid.$khach", Emoji: "😆"}
+	jobs <- outJob{ID: "j6", ThreadID: "42", Text: " 👍 ", Otid: "600"}
 	type upload struct {
 		query    url.Values
 		field    string
@@ -461,7 +467,7 @@ func TestSendEndToEndFakeGateway(t *testing.T) {
 		}
 	}))
 	defer up.Close()
-	results := make(chan outResult, 4)
+	results := make(chan outResult, 6)
 	ingest := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/outbox":
@@ -494,7 +500,7 @@ func TestSendEndToEndFakeGateway(t *testing.T) {
 	defer func() { cancel(); <-done }()
 
 	got := map[string]outResult{}
-	for len(got) < 4 {
+	for len(got) < 6 {
 		select {
 		case r := <-results:
 			got[r.ID] = r
@@ -534,8 +540,26 @@ func TestSendEndToEndFakeGateway(t *testing.T) {
 
 	gw.mu.Lock()
 	defer gw.mu.Unlock()
-	if len(gw.tasks) != 3 {
+	if len(gw.tasks) != 5 {
 		t.Fatalf("tasks %+v", gw.tasks)
+	}
+	if r := got["j5"]; !r.OK || r.Unknown {
+		t.Fatalf("j5 %+v", r)
+	}
+	if r := got["j6"]; !r.OK || r.Mid != "mid.sent-600" {
+		t.Fatalf("j6 %+v", r)
+	}
+	var react, like taskPayload
+	_ = json.Unmarshal([]byte(gw.tasks[3].Payload), &react)
+	_ = json.Unmarshal([]byte(gw.tasks[4].Payload), &like)
+	if len(react.Tasks) != 1 || react.Tasks[0].Label != "29" || react.Tasks[0].QueueName != "reaction:mid.$khach" ||
+		!strings.HasPrefix(react.Tasks[0].Payload, `{"thread_key":42,"timestamp_ms":`) ||
+		!strings.HasSuffix(react.Tasks[0].Payload, `"message_id":"mid.$khach","actor_id":`+testPageID+`,"reaction":"😆","reaction_style":null,"sync_group":205,"send_attribution":4456448,"dataclass_params":null,"attachment_fbid":null,"offline_threading_id":null}`) {
+		t.Fatalf("react task %+v", react.Tasks)
+	}
+	// Chỉ "👍": nút Like (sticker), payload như trang gửi, không có khoá text.
+	if want := `{"thread_id":42,"otid":"600","source":4456448,"send_type":2,"sync_group":205,"mark_thread_read":1,"sticker_id":369239263222822}`; len(like.Tasks) != 1 || like.Tasks[0].Payload != want {
+		t.Fatalf("like task %+v", like.Tasks)
 	}
 	var fileReq taskPayload
 	_ = json.Unmarshal([]byte(gw.tasks[2].Payload), &fileReq)

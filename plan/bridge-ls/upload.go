@@ -143,19 +143,28 @@ func escapeQuotes(s string) string {
 
 // tasksFor: mỗi tệp một task 46 (send_type 3, text null) rồi task chữ, cùng một
 // request như trang gửi ảnh kèm chữ. Trích dẫn gắn vào task cuối (task chữ nếu có).
-func tasksFor(thread int64, j outJob, fbids []int64) []sendTask {
-	var tasks []sendTask
+// Chỉ một "👍" (không tệp, không trích dẫn) thành nút Like như Messenger.
+func tasksFor(thread int64, j outJob, fbids []int64) []outTask {
+	if len(fbids) == 0 && j.ReplyTo == "" && strings.TrimSpace(j.Text) == "👍" {
+		return []outTask{&stickerTask{ThreadID: thread, Otid: j.Otid, Source: sendSource, SendType: 2,
+			SyncGroup: json.Number(lsDatabase), MarkThreadRead: 1, StickerID: likeStickerID}}
+	}
+	var tasks []*sendTask
 	for i, id := range fbids {
-		tasks = append(tasks, sendTask{ThreadID: thread, Otid: j.Files[i].Otid, Source: 0, SendType: 3,
+		tasks = append(tasks, &sendTask{ThreadID: thread, Otid: j.Files[i].Otid, Source: 0, SendType: 3,
 			SyncGroup: json.Number(lsDatabase), AttachmentFBIDs: []int64{id}})
 	}
 	if strings.TrimSpace(j.Text) != "" {
 		text := j.Text
-		tasks = append(tasks, sendTask{ThreadID: thread, Otid: j.Otid, Source: sendSource, SendType: 1,
+		tasks = append(tasks, &sendTask{ThreadID: thread, Otid: j.Otid, Source: sendSource, SendType: 1,
 			SyncGroup: json.Number(lsDatabase), MarkThreadRead: 1, Text: &text})
 	}
 	if j.ReplyTo != "" && len(tasks) > 0 {
 		tasks[len(tasks)-1].ReplyMetadata = &replyMetadata{ReplySourceID: j.ReplyTo, ReplySourceType: 1}
 	}
-	return tasks
+	out := make([]outTask, len(tasks))
+	for i, t := range tasks {
+		out[i] = t
+	}
+	return out
 }

@@ -35,11 +35,15 @@ const (
 // outJob: một tin trong hàng đợi gửi của fb-bridge-web.
 type outJob struct {
 	ID       string    `json:"id"`
+	Kind     string    `json:"kind,omitempty"` // "" = gửi tin, "react" = thả/gỡ cảm xúc (react.go)
 	ThreadID string    `json:"thread_id"`
 	Text     string    `json:"text"`
 	ReplyTo  string    `json:"reply_to,omitempty"`
 	Otid     string    `json:"otid"` // của task chữ
 	Files    []outFile `json:"files,omitempty"`
+	// react: tin được thả cảm xúc và emoji ("" = gỡ).
+	MessageID string `json:"message_id,omitempty"`
+	Emoji     string `json:"emoji,omitempty"`
 }
 
 // outFile: tệp nhân viên gửi (base64 trong JSON), mỗi tệp một otid riêng để
@@ -124,6 +128,9 @@ func (l *Listener) sendLoop(ctx context.Context) {
 }
 
 func (l *Listener) sendJob(ctx context.Context, j outJob) outResult {
+	if j.Kind == "react" {
+		return l.reactJob(ctx, j)
+	}
 	res := outResult{ID: j.ID}
 	thread, err := strconv.ParseInt(j.ThreadID, 10, 64)
 	valid := err == nil && thread > 0 && (strings.TrimSpace(j.Text) == "" || j.Otid != "") &&
@@ -154,7 +161,7 @@ func (l *Listener) sendJob(ctx context.Context, j outJob) outResult {
 		fbids = append(fbids, id)
 	}
 	tasks := tasksFor(thread, j, fbids)
-	payload, err := l.sendRequest(j.ThreadID, tasks)
+	payload, err := l.sendRequest(sendTaskLabel, j.ThreadID, taskPayloads(tasks))
 	if err != nil {
 		res.Error = "Không tạo được yêu cầu gửi."
 		return res
@@ -179,7 +186,7 @@ func (l *Listener) sendJob(ctx context.Context, j outJob) outResult {
 		}
 	}
 	for _, t := range tasks {
-		if mid := mids[t.Otid]; mid != "" {
+		if mid := mids[t.otid()]; mid != "" {
 			res.Mids = append(res.Mids, mid)
 		}
 	}
@@ -195,21 +202,22 @@ func (l *Listener) sendJob(ctx context.Context, j outJob) outResult {
 	return res
 }
 
-// sendRequest dựng request type 3 với các task 46, thứ tự khoá như trang gửi.
-func (l *Listener) sendRequest(queue string, tasks []sendTask) ([]byte, error) {
-	data := make([]taskData, 0, len(tasks))
+// sendRequest dựng request type 3, mỗi payload một task cùng label và hàng đợi,
+// thứ tự khoá như trang gửi.
+func (l *Listener) sendRequest(label, queue string, payloads []any) ([]byte, error) {
+	data := make([]taskData, 0, len(payloads))
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.info == nil {
 		return nil, errors.New("no inbox page info")
 	}
-	for _, t := range tasks {
-		inner, err := json.Marshal(t)
+	for _, p := range payloads {
+		inner, err := json.Marshal(p)
 		if err != nil {
 			return nil, err
 		}
 		l.taskID++
-		data = append(data, taskData{Label: sendTaskLabel, Payload: string(inner), QueueName: queue, TaskID: l.taskID})
+		data = append(data, taskData{Label: label, Payload: string(inner), QueueName: queue, TaskID: l.taskID})
 	}
 	outer, err := json.Marshal(taskPayload{EpochID: epochID(), VersionID: l.info.Version, Tasks: data})
 	if err != nil {

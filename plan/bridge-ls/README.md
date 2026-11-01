@@ -62,6 +62,7 @@ Hệ quả: mỗi lần nối lại là một ảnh chụp lịch sử. Ảnh ch
 | `forward.go` | Gửi fb-bridge-web, tải file (tối đa 20 MiB) |
 | `send.go` | Gửi tin trả lời: hỏi `/outbox`, task 46 trên stream dùng một lần, báo `/outbox/result` |
 | `upload.go` | Tải tệp lên `upload.php` trước khi gửi, dựng task tệp |
+| `react.go` | Thả, gỡ cảm xúc (task 29), sticker Like |
 | `store.go` | `data/cookies.json`, `data/state.json`, ghi tạm rồi đổi tên, quyền 600 |
 | `export-cookies.sh` | Lấy cookie từ fbweb-browser qua CDP |
 
@@ -94,9 +95,12 @@ Bắt bằng CDP trong fbweb-browser khi người dùng trả lời trên Trang 
 - Kèm theo trang còn gửi task `21` (đánh dấu đã đọc) và `160012` (kiểm tra khách còn nhận được tin); không bắt buộc, `fbweb-ls` không gửi.
 - Server trả lời trên chính stream đó, cùng `request_id`: `taskExists`, **`replaceOptimsiticMessage [otid, mid]`** (Facebook viết sai chính tả), `mailboxTaskCompletionApiOnTaskCompletion`, `removeTask`. Khoảng 1 giây sau tin của Trang quay lại trên stream db 205 (`insertMessage`, sender là Trang, `otid` ở tham số 9).
 - Không có trường riêng cho Trang: Trang xác định bằng `x-dgw-app-asset_ids` lúc mở socket. Task giống `SendMessageTask` của mautrix-meta (`messagix/socket/threads.go`).
-- Cảm xúc, sticker: chưa bắt được (trang crash vì Chromium hết bộ nhớ ở chế độ đăng nhập).
+- Cảm xúc (bắt lần ba): task label `29` trên hàng đợi `reaction:<mid>`, payload `{"thread_key","timestamp_ms","message_id","actor_id":<id Trang>,"reaction":"😄","reaction_style":null,"sync_group":205,"send_attribution":4456448,"dataclass_params":null,"attachment_fbid":null,"offline_threading_id":null}`; server trả `replaceOptimisticReaction`. Chưa bắt được frame gỡ (trang crash); `fbweb-ls` gỡ bằng `reaction ""` như mautrix-meta.
+- Sticker, Like: task 46 `{"thread_id","otid","source":4456448,"send_type":2,"sync_group":205,"mark_thread_read":1,"sticker_id":<id>}` (không có khoá `text`); Like là sticker `369239263222822`.
+- Sửa, thu hồi tin của Trang: Business Suite trên web không có nút.
+- Chromium Alpine của fbweb-browser crash renderer khi mở bảng cảm xúc hoặc sticker có hình động; watchdog mở lại tab ở Trang mặc định trong `.env` (Trang thật), nên sau crash phải xem lại đang ở Trang nào.
 
-`send.go` làm đúng như trên với chữ, trích dẫn và tệp (tới 25 MB mỗi tệp; mỗi tệp một otid, tệp trước chữ sau, cần xác nhận đủ mọi task). Bật bằng `FBLS_SEND=1` (fb-bridge-web cần Trang trong `FBWEB_SEND`). `fbweb-ls` chỉ hỏi hàng đợi (`POST /outbox`, long-poll) khi socket đã theo kịp; chỉ báo thành công khi có `replaceOptimsiticMessage` đúng `otid`. Lỗi trước khi gửi lên socket là `retry` (fb-bridge-web trả `503`, gateway thử lại); đã gửi mà không có xác nhận là `unknown` (`422`, không gửi lại). Tin của Trang trên db 205 thành sự kiện `page_message` (kèm `otid`): fb-bridge-web bỏ tin chính `fbweb-ls` gửi, tin khác thành ghi chú "chủ tài khoản trả lời". Chi tiết phía server: `omnichannel/fb-bridge-web/README.md`, mục "Đường gửi"; quyết định: `omnichannel/docs/DECISIONS.md` D17.
+`send.go`, `react.go` làm đúng như trên với chữ, trích dẫn, tệp, cảm xúc và "👍" (nút Like) (tới 25 MB mỗi tệp; mỗi tệp một otid, tệp trước chữ sau, cần xác nhận đủ mọi task). Bật bằng `FBLS_SEND=1` (fb-bridge-web cần Trang trong `FBWEB_SEND`). `fbweb-ls` chỉ hỏi hàng đợi (`POST /outbox`, long-poll) khi socket đã theo kịp; chỉ báo thành công khi có `replaceOptimsiticMessage` đúng `otid`. Lỗi trước khi gửi lên socket là `retry` (fb-bridge-web trả `503`, gateway thử lại); đã gửi mà không có xác nhận là `unknown` (`422`, không gửi lại). Tin của Trang trên db 205 thành sự kiện `page_message` (kèm `otid`): fb-bridge-web bỏ tin chính `fbweb-ls` gửi, tin khác thành ghi chú "chủ tài khoản trả lời". Chi tiết phía server: `omnichannel/fb-bridge-web/README.md`, mục "Đường gửi"; quyết định: `omnichannel/docs/DECISIONS.md` D17.
 
 ## 🧪 Trang thử
 
