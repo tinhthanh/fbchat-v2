@@ -113,6 +113,15 @@ docker compose --profile test stop ls-test    # tắt
 
 Số trên URL `profile.php?id=` của Trang không phải `asset_id` của Business Suite; lấy `asset_id` trên URL Hộp thư.
 
+## 📋 Danh sách Trang (bắt frame 01/11/2026, chưa viết code)
+
+Cho D18 của omnichannel (agent liệt kê Trang để admin chọn). Bắt bằng CDP khi người dùng mở ô chọn Trang ở góc trên bên trái Hộp thư (chỉ đọc, Trang thử):
+
+- GraphQL `POST business.facebook.com/api/graphql/`, `fb_api_req_friendly_name=NorthStarBusinessUnifiedScopingSelectorFirstAndZeroLevelScopesSectionAllZeroLevelScopesQuery`, `doc_id=37857269907251700`. Biến chính: `businessToolName "MBS_INBOX"`, `firstLevelScopeId` và `scopeIDs [..]` là id người dùng (`c_user`), `zeroLevelScopeId` là Trang đang mở, `isPersonalAccount true`, `countLimit 201`, `fetchNumberForPersonalChildrenScopes 40`.
+- Phản hồi: `data.viewer.meta_business_scoping.personal_scopes {count, page_info{end_cursor, has_next_page}, edges[].node{scope_id, scope_name, scope_type "PAGE", scope_description, scope_redirect_uri, scope_profile_picture{uri}}}`. `scope_id` chính là `asset_id` (Trang thử và Trang VetGo đều có trong danh sách). `count` là 5 nhưng chỉ hai Trang trên được đối chiếu; ba mục còn lại chưa xem loại gì.
+- Trang thuộc portfolio doanh nghiệp nằm ở `business_scopes` của `NorthStarBusinessUnifiedScopingSelectorPopoverContainerAllFirstLevelScopesQuery` (`doc_id=28183223691347905`); tài khoản này có `count 0` nên chưa thấy cấu trúc.
+- `doc_id` đổi theo bản phát hành của Facebook. Code nên tìm theo tên query trong JS của trang, hoặc báo lỗi rõ để bắt lại.
+
 ## ⚠️ Chưa biết, cần thử thật
 
 - Chạy lâu: phiên có bền không, socket có bị server đóng định kỳ không, `pageRefresh` 6 giờ có cần không.
