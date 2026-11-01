@@ -295,6 +295,14 @@ class AccountBot(SimpleBot):
             history.record("disconnected", "Messenger ngắt kết nối E2EE")
         elif kind == "reconnected":
             history.record("connected", "Đã nối lại Messenger")
+        if kind in ("reconnected", "e2eeConnected") and self._loop is not None:
+            # Có lần thư viện chỉ nối lại socket E2EE, không báo transport
+            # "connected" (shop2 30/10/2026): coi đây là đã nối lại, nếu không
+            # tài khoản kẹt "retrying" dù vẫn nhận gửi bình thường.
+            with contextlib.suppress(RuntimeError):  # loop đã đóng khi đang tắt
+                self._loop.call_soon_threadsafe(
+                    self._apply_connection_status, {"state": "connected"}
+                )
         elif kind == "error":
             label = classify_bridge_error(event.get("data"))
             if label:

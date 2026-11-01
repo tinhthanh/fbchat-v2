@@ -519,3 +519,36 @@ async def test_library_reconnect_status_moves_account_state(
     assert json.loads(health.read_text()) == {"acc1": "running"}
     kinds = [item["kind"] for item in multi_main.account_history("acc1").items]
     assert kinds[-2:] == ["network", "connected"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("event_type", ["reconnected", "e2eeConnected"])
+async def test_e2ee_reconnect_without_transport_connected_restores_running(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    mock_dataFB: dict[str, Any],
+    fake_listener: _FakeListener,
+    event_type: str,
+) -> None:
+    # shop2 30/10/2026: transport "reconnecting" rồi chỉ có e2ee "reconnected",
+    # không có transport "connected"; tài khoản kẹt "retrying", container unhealthy.
+    health = tmp_path / "health.json"
+    monkeypatch.setattr(multi_main, "HEALTH_FILE", str(health))
+    monkeypatch.setattr(multi_main, "_account_states", {"acc1": "running"})
+    monkeypatch.setattr(multi_main, "_account_history", {})
+    bot = multi_main.AccountBot(mock_dataFB, account="acc1", device_path="/d.json")
+    bot._loop = asyncio.get_running_loop()
+
+    bot._log_connection_status({"state": "reconnecting", "reason": "network"})
+    await asyncio.sleep(0)
+    assert json.loads(health.read_text()) == {"acc1": "retrying"}
+
+    bot._record_lifecycle({"type": event_type})
+    await asyncio.sleep(0)
+    assert json.loads(health.read_text()) == {"acc1": "running"}
+
+    # Đang chạy bình thường thì sự kiện E2EE không ghi thêm lịch sử "Đã kết nối".
+    before = len(multi_main.account_history("acc1").items)
+    bot._record_lifecycle({"type": "e2eeConnected"})
+    await asyncio.sleep(0)
+    assert len(multi_main.account_history("acc1").items) == before
