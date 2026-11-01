@@ -201,9 +201,12 @@ func TestNewThread(t *testing.T) {
 		}
 		t.Fatal("no gif")
 	})
-	t.Run("tin cũ và tin trả lời tự động của Trang bị bỏ qua, tên khách giữ cho các tin sau", func(t *testing.T) {
+	t.Run("tin cũ của Trang bị bỏ qua, tên khách giữ cho các tin sau", func(t *testing.T) {
 		var kinds []string
 		for _, e := range events {
+			if e.Kind == "page_message" {
+				continue // tin trả lời tự động, xem test dưới
+			}
 			k := "text"
 			if len(e.Attachments) > 0 {
 				k = e.Attachments[0].Kind
@@ -215,6 +218,17 @@ func TestNewThread(t *testing.T) {
 		}
 		if want := []string{"sticker", "audio", "video", "gif"}; !reflect.DeepEqual(kinds, want) {
 			t.Fatalf("got %v", kinds)
+		}
+	})
+	t.Run("tin trả lời tự động của Trang (insertMessage) là page_message có otid", func(t *testing.T) {
+		var page []Event
+		for _, e := range events {
+			if e.Kind == "page_message" {
+				page = append(page, e)
+			}
+		}
+		if len(page) != 1 || page[0].SenderID != testPageID || page[0].Otid == "" || page[0].ThreadID != "100005036221206" || page[0].Text == "" {
+			t.Fatalf("got %+v", page)
 		}
 	})
 }
@@ -276,8 +290,14 @@ func insertMessage(proc, ts, mid, sender string) call {
 }
 
 func TestFilters(t *testing.T) {
-	if ev := parseCalls([]call{insertMessage("insertMessage", "1000", "mid.a", testPageID)}, testPageID, 0, map[string]string{}); len(ev) != 0 {
-		t.Errorf("TC-17 page message emitted: %+v", ev)
+	// Tin Trang gửi: insertMessage thành page_message (ghi chú cho nhân viên, nhận ra tin
+	// fbweb-ls tự gửi theo otid); upsertMessage của Trang là lịch sử, bỏ.
+	ev := parseCalls([]call{insertMessage("insertMessage", "1000", "mid.a", testPageID)}, testPageID, 0, map[string]string{})
+	if len(ev) != 1 || ev[0].Kind != "page_message" || ev[0].Otid != "otid" || ev[0].Mid != "mid.a" {
+		t.Errorf("TC-17 page message: %+v", ev)
+	}
+	if ev := parseCalls([]call{insertMessage("upsertMessage", "1000", "mid.a", testPageID)}, testPageID, 0, map[string]string{}); len(ev) != 0 {
+		t.Errorf("page upsert emitted: %+v", ev)
 	}
 	page := []call{
 		{"upsertReaction", []any{"t", "1", "mid.a", testPageID, "❤", "80"}},

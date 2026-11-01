@@ -199,6 +199,7 @@ type fakeGateway struct {
 	header   http.Header
 	params   string
 	syncReqs []lsRequest
+	tasks    []lsRequest // request type 3 (gửi tin), mỗi cái trên một stream riêng
 	pushAckd bool
 	push     []byte
 }
@@ -236,6 +237,13 @@ func (g *fakeGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 				var req lsRequest
 				_ = json.Unmarshal(f.Payload, &req)
+				if req.Type == 3 {
+					g.mu.Lock()
+					g.tasks = append(g.tasks, req)
+					g.mu.Unlock()
+					write(&dgw.DataFrame{StreamID: f.StreamID, AckID: 1, RequiresAck: true, Payload: taskReply(req)})
+					continue
+				}
 				g.mu.Lock()
 				g.syncReqs = append(g.syncReqs, req)
 				n := len(g.syncReqs)
@@ -391,5 +399,110 @@ func TestGapRecoveryFromSnapshot(t *testing.T) {
 	// Frame vừa báo theo kịp: mốc còn sống được ghi lại.
 	if s := loadState(l.statePath()); s.LiveUntilMs < now.UnixMilli() {
 		t.Fatalf("live_until_ms %d", s.LiveUntilMs)
+	}
+}
+
+// taskReply trả lời task gửi tin như server thật (bắt frame 01/11/2026):
+// replaceOptimsiticMessage [otid, mid]; tin chữ "không xác nhận" thì không có.
+func taskReply(req lsRequest) []byte {
+	var tp taskPayload
+	_ = json.Unmarshal([]byte(req.Payload), &tp)
+	var st sendTask
+	if len(tp.Tasks) > 0 {
+		_ = json.Unmarshal([]byte(tp.Tasks[0].Payload), &st)
+	}
+	step := []any{1, []any{5, "taskExists", []any{19, "1"}}, []any{5, "removeTask", []any{19, "1"}}}
+	if st.Text != "không xác nhận" {
+		step = append(step, []any{5, "replaceOptimsiticMessage", st.Otid, "mid.sent-" + st.Otid})
+	}
+	payload, _ := json.Marshal(map[string]any{"step": step})
+	b, _ := json.Marshal(map[string]any{"request_id": req.RequestID, "payload": string(payload)})
+	return b
+}
+
+func TestSendEndToEndFakeGateway(t *testing.T) {
+	jobs := make(chan outJob, 2)
+	jobs <- outJob{ID: "j1", ThreadID: "42", Text: "chào khách", ReplyTo: "mid.q", Otid: "7522540858541379169"}
+	jobs <- outJob{ID: "j2", ThreadID: "42", Text: "không xác nhận", Otid: "7522540858541379170"}
+	results := make(chan outResult, 2)
+	ingest := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/outbox":
+			select {
+			case j := <-jobs:
+				_ = json.NewEncoder(w).Encode(j)
+			case <-time.After(50 * time.Millisecond):
+				w.WriteHeader(http.StatusNoContent)
+			}
+		case "/outbox/result":
+			var body struct{ Result outResult }
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			results <- body.Result
+		}
+	}))
+	defer ingest.Close()
+	gw := &fakeGateway{push: frameOf(t, pushStep("c-after"))}
+	srv := httptest.NewServer(gw)
+	defer srv.Close()
+
+	l := testListener(t, ingest.URL, false)
+	l.cfg.Send = true
+	l.wsURL = "ws" + strings.TrimPrefix(srv.URL, "http")
+	l.ws = &http.Client{Transport: &browserTransport{base: http.DefaultTransport, ua: defaultUserAgent, pageID: testPageID, regionHint: l.regionHint}}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { l.Run(ctx); close(done) }()
+	defer func() { cancel(); <-done }()
+
+	got := map[string]outResult{}
+	for len(got) < 2 {
+		select {
+		case r := <-results:
+			got[r.ID] = r
+		case <-time.After(10 * time.Second):
+			t.Fatalf("results %+v", got)
+		}
+	}
+	if r := got["j1"]; !r.OK || r.Mid != "mid.sent-7522540858541379169" || r.Unknown || r.Retry {
+		t.Fatalf("j1 %+v", r)
+	}
+	// Không có replaceOptimsiticMessage: có thể đã gửi, không được gửi lại.
+	if r := got["j2"]; r.OK || !r.Unknown || r.Retry || !strings.Contains(r.Error, "removeTask") {
+		t.Fatalf("j2 %+v", r)
+	}
+
+	gw.mu.Lock()
+	defer gw.mu.Unlock()
+	if len(gw.tasks) != 2 {
+		t.Fatalf("tasks %+v", gw.tasks)
+	}
+	req := gw.tasks[0]
+	var tp taskPayload
+	if err := json.Unmarshal([]byte(req.Payload), &tp); err != nil {
+		t.Fatal(err)
+	}
+	if req.Type != 3 || req.AppID != "111222333444555" || tp.VersionID != "9876543210123456" || len(tp.Tasks) != 1 ||
+		tp.Tasks[0].Label != "46" || tp.Tasks[0].QueueName != "42" || tp.Tasks[0].FailureCount != nil {
+		t.Fatalf("task request %+v %+v", req, tp)
+	}
+	// Payload của task đúng thứ tự khoá và giá trị như Business Suite gửi.
+	want := `{"thread_id":42,"otid":"7522540858541379169","source":4456448,"send_type":1,"sync_group":205,"mark_thread_read":1,"text":"chào khách",` +
+		`"reply_metadata":{"reply_source_id":"mid.q","reply_source_type":1,"reply_type":0,"reply_source_attachment_id":null}}`
+	if tp.Tasks[0].Payload != want {
+		t.Fatalf("task payload\n got %s\nwant %s", tp.Tasks[0].Payload, want)
+	}
+	if strings.Contains(gw.tasks[1].Payload, "reply_metadata") {
+		t.Fatalf("no reply expected: %s", gw.tasks[1].Payload)
+	}
+}
+
+func TestSendJobRefusesWhenNotConnected(t *testing.T) {
+	l := testListener(t, "", false)
+	r := l.sendJob(context.Background(), outJob{ID: "j", ThreadID: "42", Text: "x", Otid: "1"})
+	if r.OK || !r.Retry || r.Unknown {
+		t.Fatalf("got %+v", r)
+	}
+	if r := l.sendJob(context.Background(), outJob{ID: "j", ThreadID: "abc", Text: "x", Otid: "1"}); r.Retry || r.OK || r.Error == "" {
+		t.Fatalf("invalid thread %+v", r)
 	}
 }

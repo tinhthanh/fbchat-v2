@@ -58,8 +58,9 @@ Hệ quả: mỗi lần nối lại là một ảnh chụp lịch sử. Ảnh ch
 | `page.go` | Tải và đọc trang Hộp thư |
 | `transport.go` | Danh tính trình duyệt, uTLS, viết lại URL và header bắt tay theo đúng trình duyệt |
 | `listener.go` | Socket DGW, stream db 205, cursor, nối lại |
-| `lsparse.go` | Parse frame thành sự kiện (giữ đồng bộ với `../bridge-web/bs-inbox-listener.js`) |
+| `lsparse.go` | Parse frame thành sự kiện (giữ đồng bộ với `../bridge-web/bs-inbox-listener.js`; riêng bản Go phát thêm `page_message`) |
 | `forward.go` | Gửi fb-bridge-web, tải file (tối đa 20 MiB) |
+| `send.go` | Gửi tin trả lời: hỏi `/outbox`, task 46 trên stream dùng một lần, báo `/outbox/result` |
 | `store.go` | `data/cookies.json`, `data/state.json`, ghi tạm rồi đổi tên, quyền 600 |
 | `export-cookies.sh` | Lấy cookie từ fbweb-browser qua CDP |
 
@@ -73,9 +74,28 @@ FBLS_DRY_RUN=1 docker compose up -d --build       # chỉ log loại/mid sự ki
 docker compose up -d                              # gửi thật (dùng .env của ../bridge-web/browser)
 ```
 
-Biến môi trường: `FBWEB_PAGE_ID`, `FBWEB_ACCOUNT`, `FBWEB_TOKEN`, `FBWEB_URL` (như fbweb-browser), `FBLS_DRY_RUN`, `FBLS_DEBUG`, `FBLS_PAGE_NAME` (dự phòng), `FBLS_USER_AGENT`, `FBLS_DATA` (mặc định `/data`), `FBLS_STATE` (tên file cursor trong `FBLS_DATA`, mặc định `state.json`).
+Biến môi trường: `FBWEB_PAGE_ID`, `FBWEB_ACCOUNT`, `FBWEB_TOKEN`, `FBWEB_URL` (như fbweb-browser), `FBLS_DRY_RUN`, `FBLS_DEBUG`, `FBLS_PAGE_NAME` (dự phòng), `FBLS_USER_AGENT`, `FBLS_DATA` (mặc định `/data`), `FBLS_STATE` (tên file cursor trong `FBLS_DATA`, mặc định `state.json`), `FBLS_SEND` (`1`: gửi tin trả lời từ Libredesk).
 
 Image `scratch` khoảng 12 MB, giới hạn RAM 64 MiB (`GOMEMLIMIT` 40 MiB).
+
+## 📤 Gửi tin (bắt frame 01/11/2026)
+
+Bắt bằng CDP trong fbweb-browser khi người dùng trả lời trên Trang thử (chỉ đọc). Business Suite gửi trên **chính socket Lightspeed**, mỗi tin một stream dùng một lần: frame mở stream tham số `{}` rồi data `{"app_id","payload","request_id","type":3}`, `request_id` chung bộ đếm với request đồng bộ. Payload:
+
+```json
+{"epoch_id": <ms<<22|...>, "tasks": [{"failure_count": null, "label": "46",
+  "payload": "{\"thread_id\":<id khách>,\"otid\":\"<ms<<22|rand>\",\"source\":4456448,\"send_type\":1,\"sync_group\":205,\"mark_thread_read\":1,\"text\":\"...\"}",
+  "queue_name": "<id khách>", "task_id": <n>}], "version_id": "<LSVersion>"}
+```
+
+- Trả lời một tin: thêm `"reply_metadata":{"reply_source_id":"<mid>","reply_source_type":1,"reply_type":0,"reply_source_attachment_id":null}`.
+- Ảnh: `POST upload-business.facebook.com/ajax/mercury/upload.php` (form có `fb_dtsg`, `jazoest`, `lsd`) trả `fbid`, rồi task 46 với `source 0`, `send_type 3`, `text null`, `attachment_fbids [fbid]`; chữ đi kèm là một task 46 riêng. **Chưa làm.**
+- Kèm theo trang còn gửi task `21` (đánh dấu đã đọc) và `160012` (kiểm tra khách còn nhận được tin); không bắt buộc, `fbweb-ls` không gửi.
+- Server trả lời trên chính stream đó, cùng `request_id`: `taskExists`, **`replaceOptimsiticMessage [otid, mid]`** (Facebook viết sai chính tả), `mailboxTaskCompletionApiOnTaskCompletion`, `removeTask`. Khoảng 1 giây sau tin của Trang quay lại trên stream db 205 (`insertMessage`, sender là Trang, `otid` ở tham số 9).
+- Không có trường riêng cho Trang: Trang xác định bằng `x-dgw-app-asset_ids` lúc mở socket. Task giống `SendMessageTask` của mautrix-meta (`messagix/socket/threads.go`).
+- Cảm xúc, sticker: chưa bắt được (trang crash vì Chromium hết bộ nhớ ở chế độ đăng nhập).
+
+`send.go` làm đúng như trên với chữ và trích dẫn. Bật bằng `FBLS_SEND=1` (fb-bridge-web cần Trang trong `FBWEB_SEND`). `fbweb-ls` chỉ hỏi hàng đợi (`POST /outbox`, long-poll) khi socket đã theo kịp; chỉ báo thành công khi có `replaceOptimsiticMessage` đúng `otid`. Lỗi trước khi gửi lên socket là `retry` (fb-bridge-web trả `503`, gateway thử lại); đã gửi mà không có xác nhận là `unknown` (`422`, không gửi lại). Tin của Trang trên db 205 thành sự kiện `page_message` (kèm `otid`): fb-bridge-web bỏ tin chính `fbweb-ls` gửi, tin khác thành ghi chú "chủ tài khoản trả lời". Chi tiết phía server: `omnichannel/fb-bridge-web/README.md`, mục "Đường gửi"; quyết định: `omnichannel/docs/DECISIONS.md` D17.
 
 ## 🧪 Trang thử
 

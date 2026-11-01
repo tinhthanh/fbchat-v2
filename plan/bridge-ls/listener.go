@@ -52,6 +52,7 @@ type Config struct {
 	PageName  string // dự phòng khi trang chưa cho biết tên Trang
 	DataDir   string
 	StateFile string // mặc định state.json; mỗi Trang một file khi chạy nhiều bản chung cookie
+	Send      bool   // FBLS_SEND=1: nhận tin cần gửi từ fb-bridge-web (send.go)
 	UserAgent UserAgent
 }
 
@@ -72,7 +73,10 @@ type Listener struct {
 	resetCursor bool
 	contacts    map[string]string
 	seen        *dedupe
-	requestID   int
+	requestID   int // chung cho request đồng bộ và task gửi tin, như trang
+	syncReq     int // request đồng bộ gần nhất: chỉ phản hồi của nó quyết định đã theo kịp chưa
+	taskID      int
+	sock        *dgw.Socket
 	stream      *dgw.PersistentStream
 	streamReady chan struct{} // đóng khi stream của kết nối hiện tại đã có (onConnect)
 	resyncs     int           // số lần đồng bộ lại (type 1) trong kết nối này
@@ -121,6 +125,9 @@ func (l *Listener) PageName() string {
 func (l *Listener) Run(ctx context.Context) {
 	go l.fwd.Run(ctx)
 	go l.heartbeatLoop(ctx)
+	if l.cfg.Send && !l.fwd.DryRun {
+		go l.sendLoop(ctx)
+	}
 	step := 0
 	wait := func() {
 		d := backoffSteps[min(step, len(backoffSteps)-1)]
@@ -236,7 +243,7 @@ func (l *Listener) onConnect(ctx context.Context, sock *dgw.Socket, fatal func(e
 	ready := make(chan struct{})
 	l.mu.Lock()
 	l.resyncs, l.catchups, l.snapshotReq = 0, 0, 0
-	l.stream, l.streamReady = nil, ready
+	l.stream, l.streamReady, l.sock = nil, ready, sock
 	l.caughtUp.Store(false)
 	l.mu.Unlock()
 	stream, err := sock.EstablishStream(ctx, dgw.StreamInit{
@@ -306,6 +313,7 @@ func (l *Listener) syncRequestLocked(fresh bool) ([]byte, error) {
 		return nil, err
 	}
 	l.requestID++
+	l.syncReq = l.requestID
 	if fresh {
 		l.snapshotReq = int64(l.requestID)
 	}
@@ -360,7 +368,7 @@ func (l *Listener) handleFrame(_ context.Context, data []byte) error {
 	// gửi tiếp type 2 với cursor mới như trình duyệt (và mautrix) làm. Server chỉ
 	// đẩy tin mới sau khi client đã theo kịp (thử thật 31/10/2026).
 	var catchup []byte
-	latest := env.RequestID != nil && *env.RequestID == int64(l.requestID)
+	latest := env.RequestID != nil && *env.RequestID == int64(l.syncReq)
 	if latest && block.Args != nil && str(block.Args, 3) != "" && str(block.Args, 3) != str(block.Args, 2) {
 		if l.catchups < 10 {
 			l.catchups++

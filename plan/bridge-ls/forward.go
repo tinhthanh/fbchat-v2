@@ -111,32 +111,39 @@ func (f *Forwarder) Heartbeat(ctx context.Context) {
 
 // post trả mã HTTP, 0 nếu lỗi mạng.
 func (f *Forwarder) post(ctx context.Context, path string, extra map[string]any) int {
+	status, _ := f.postRead(ctx, path, extra)
+	return status
+}
+
+// postRead như post nhưng trả cả thân (tối đa 64 KiB), cho /outbox.
+func (f *Forwarder) postRead(ctx context.Context, path string, extra map[string]any) (int, []byte) {
 	body := map[string]any{"account": f.Account, "page_id": f.PageID, "page_name": f.PageName(), "version": ingestVersion}
 	for k, v := range extra {
 		body[k] = v
 	}
 	data, err := json.Marshal(body)
 	if err != nil {
-		return 0
+		return 0, nil
 	}
 	r, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(f.URL, "/")+path, bytes.NewReader(data))
 	if err != nil {
-		return 0
+		return 0, nil
 	}
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Authorization", "Bearer "+f.Token)
 	resp, err := f.ingest.Do(r)
 	if err != nil {
-		return 0
+		return 0, nil
 	}
+	out, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 	_, _ = io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
-	return resp.StatusCode
+	return resp.StatusCode, out
 }
 
 // withFiles tải file ngay: URL CDN có chữ ký và hết hạn, server không có cookie.
 func (f *Forwarder) withFiles(ctx context.Context, e Event) Event {
-	if e.Kind != "message" || len(e.Attachments) == 0 {
+	if (e.Kind != "message" && e.Kind != "page_message") || len(e.Attachments) == 0 {
 		return e
 	}
 	out := make([]Attachment, 0, len(e.Attachments))

@@ -166,8 +166,9 @@ type ReplyTo struct {
 
 // Event cùng dạng với sự kiện [BS-INBOX] của bản JS (ingestEvent của fb-bridge-web).
 type Event struct {
-	Kind        string       `json:"kind"` // message | reaction | unreaction | edit
+	Kind        string       `json:"kind"` // message | page_message | reaction | unreaction | edit
 	Mid         string       `json:"mid"`
+	Otid        string       `json:"otid,omitempty"` // page_message: offline threading id của người gửi
 	ThreadID    string       `json:"threadId,omitempty"`
 	SenderID    string       `json:"senderId,omitempty"`
 	SenderName  string       `json:"senderName,omitempty"`
@@ -251,17 +252,26 @@ func parseCalls(calls []call, pageID string, minUpsertMs int64, contacts map[str
 		switch c.Name {
 		case "insertMessage", "upsertMessage":
 			sender := str(a, 10)
+			kind := "message"
 			if pageID != "" && sender == pageID {
-				continue // tin Trang tự gửi
+				// Tin Trang gửi (Business Suite, điện thoại, trả lời tự động hoặc chính
+				// fbweb-ls): chỉ insertMessage là tin mới; upsertMessage của Trang là lịch sử.
+				if c.Name != "insertMessage" {
+					continue
+				}
+				kind = "page_message"
 			}
 			ts := num(a, 5)
 			if c.Name == "upsertMessage" && ts < minUpsertMs {
 				continue
 			}
 			ev := Event{
-				Kind: "message", Mid: str(a, 8), ThreadID: str(a, 3), SenderID: sender,
+				Kind: kind, Mid: str(a, 8), ThreadID: str(a, 3), SenderID: sender,
 				SenderName: contacts[sender], Text: str(a, 0), TimestampMs: ts, StickerID: str(a, 11),
 				Attachments: attachments[str(a, 8)],
+			}
+			if kind == "page_message" {
+				ev.Otid = str(a, 9)
 			}
 			if r := str(a, 23); r != "" {
 				ev.ReplyTo = &ReplyTo{Mid: r, Text: str(a, 28), SenderID: str(a, 29)}
@@ -293,7 +303,7 @@ func parseCalls(calls []call, pageID string, minUpsertMs int64, contacts map[str
 // eventKey: Facebook gửi lặp cùng một sự kiện vài lần; mỗi khoá chỉ phát một lần.
 func eventKey(e Event) string {
 	switch e.Kind {
-	case "message":
+	case "message", "page_message":
 		return e.Mid
 	case "edit":
 		return "edit:" + e.Mid + ":" + strconv.FormatInt(e.EditCount, 10)

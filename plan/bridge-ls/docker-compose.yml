@@ -51,6 +51,8 @@ services:
       FBWEB_PAGE_ID: "1364936880042409"
       FBLS_PAGE_NAME: VetGo Test
       FBLS_STATE: state-test.json
+      # Gửi tin trả lời từ Libredesk (fb-bridge-web cần FBWEB_SEND=vetgo-test).
+      FBLS_SEND: "1"
       FBLS_DRY_RUN: ${FBLS_DRY_RUN:-0}
       FBLS_DEBUG: ${FBLS_DEBUG:-0}
       GOMEMLIMIT: 40MiB
