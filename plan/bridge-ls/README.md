@@ -2,7 +2,7 @@
 
 `fbweb-ls` là chương trình Go nhỏ thay cho `../bridge-web/browser` (Chromium khoảng 260 MiB). Nó tự mở `wss://gateway.facebook.com/ws/lightspeed` bằng phiên đã đăng nhập trong fbweb-browser, đọc frame Lightspeed của hộp thư Trang và gửi sang `fb-bridge-web` của omnichannel đúng như extension của trình duyệt (`/ingest`, `/heartbeat`). omnichannel không phải đổi gì.
 
-**Trạng thái 01/11/2026:** chạy thật thay cho fbweb-browser từ 31/10 16:00, Trang VetGo; khoảng 11-14 MiB RAM, CPU 0,1%. Đã thử thật trên Trang thử (mục dưới): chữ, ảnh, PDF, tin thoại, video (kể cả 5 MB), sticker, Like, trả lời tin (kể cả tin của Trang), sửa tin, cảm xúc, khách mới, lấy lại tin sau khi mất kết nối (2 phút trên Trang thử, 11 giờ 38 phút trên Trang VetGo). Gửi từ Libredesk (`FBLS_SEND=1`, chỉ Trang thử): chữ, trích dẫn, ảnh, video, mp3, PDF, Word, Excel, cảm xúc; mục "Gửi tin". Chưa chạy lâu.
+**Trạng thái 01/11/2026:** chạy thật thay cho fbweb-browser từ 31/10 16:00, Trang VetGo; khoảng 11-14 MiB RAM, CPU 0,1%. Đã thử thật trên Trang thử (mục dưới): chữ, ảnh, PDF, tin thoại, video (kể cả 5 MB), sticker, Like, trả lời tin (kể cả tin của Trang), sửa tin, cảm xúc, khách mới, lấy lại tin sau khi mất kết nối (2 phút trên Trang thử, 11 giờ 38 phút trên Trang VetGo). Gửi từ Libredesk (`FBLS_SEND=1`, chỉ Trang thử): chữ, trích dẫn, ảnh, video, mp3, PDF, Word, Excel, cảm xúc; mục "Gửi tin". Chưa chạy lâu. Chế độ agent (nhiều phiên, nhiều Trang, cấu hình trên trang Tài khoản kênh, D18) đã viết và test bằng server giả; liệt kê Trang đã thử thật, nghe Trang qua agent chưa chạy thật.
 
 ## 🔍 Trình duyệt gửi gì (ghi bằng CDP 31/10/2026)
 
@@ -64,6 +64,8 @@ Hệ quả: mỗi lần nối lại là một ảnh chụp lịch sử. Ảnh ch
 | `upload.go` | Tải tệp lên `upload.php` trước khi gửi, dựng task tệp |
 | `react.go` | Thả, gỡ cảm xúc (task 29), sticker Like |
 | `store.go` | `data/cookies.json`, `data/state.json`, ghi tạm rồi đổi tên, quyền 600 |
+| `pages.go` | Liệt kê Trang của phiên (GraphQL của ô chọn Trang) |
+| `agent.go` | Chế độ agent: nhiều phiên, nhiều Trang, cấu hình từ fb-bridge-web |
 | `export-cookies.sh` | Lấy cookie từ fbweb-browser qua CDP |
 
 ```bash
@@ -72,6 +74,7 @@ go test -race ./...                               # parser (fixture thật), tra
 (cd ../bridge-web/browser && FBWEB_DEBUG=1 docker compose up -d)
 ./export-cookies.sh                               # data/cookies.json, chỉ in tên cookie
 docker compose run --rm ls check                  # một lần tải trang, in độ dài/so khớp, không mở socket
+docker compose run --rm ls pages                  # liệt kê Trang của phiên (id, tên), không mở socket
 FBLS_DRY_RUN=1 docker compose up -d --build       # chỉ log loại/mid sự kiện, chưa gửi fb-bridge-web
 docker compose up -d                              # gửi thật (dùng .env của ../bridge-web/browser)
 ```
@@ -113,14 +116,25 @@ docker compose --profile test stop ls-test    # tắt
 
 Số trên URL `profile.php?id=` của Trang không phải `asset_id` của Business Suite; lấy `asset_id` trên URL Hộp thư.
 
-## 📋 Danh sách Trang (bắt frame 01/11/2026, chưa viết code)
+## 📋 Danh sách Trang (bắt frame 01/11/2026, `pages.go`)
 
-Cho D18 của omnichannel (agent liệt kê Trang để admin chọn). Bắt bằng CDP khi người dùng mở ô chọn Trang ở góc trên bên trái Hộp thư (chỉ đọc, Trang thử):
+Cho D18 của omnichannel (agent liệt kê Trang để admin chọn). Bắt bằng CDP khi người dùng mở ô chọn Trang ở góc trên bên trái Hộp thư (chỉ đọc, Trang thử), rồi đối chiếu với module JS công khai của trang:
 
-- GraphQL `POST business.facebook.com/api/graphql/`, `fb_api_req_friendly_name=NorthStarBusinessUnifiedScopingSelectorFirstAndZeroLevelScopesSectionAllZeroLevelScopesQuery`, `doc_id=37857269907251700`. Biến chính: `businessToolName "MBS_INBOX"`, `firstLevelScopeId` và `scopeIDs [..]` là id người dùng (`c_user`), `zeroLevelScopeId` là Trang đang mở, `isPersonalAccount true`, `countLimit 201`, `fetchNumberForPersonalChildrenScopes 40`.
-- Phản hồi: `data.viewer.meta_business_scoping.personal_scopes {count, page_info{end_cursor, has_next_page}, edges[].node{scope_id, scope_name, scope_type "PAGE", scope_description, scope_redirect_uri, scope_profile_picture{uri}}}`. `scope_id` chính là `asset_id` (Trang thử và Trang VetGo đều có trong danh sách). `count` là 5 nhưng chỉ hai Trang trên được đối chiếu; ba mục còn lại chưa xem loại gì.
-- Trang thuộc portfolio doanh nghiệp nằm ở `business_scopes` của `NorthStarBusinessUnifiedScopingSelectorPopoverContainerAllFirstLevelScopesQuery` (`doc_id=28183223691347905`); tài khoản này có `count 0` nên chưa thấy cấu trúc.
-- `doc_id` đổi theo bản phát hành của Facebook. Code nên tìm theo tên query trong JS của trang, hoặc báo lỗi rõ để bắt lại.
+- Tải `latest/inbox/all/` không có `asset_id` (Business Suite chuyển sang Trang mặc định, đi theo một lần) để lấy `fb_dtsg`, `lsd`, `USER_ID`.
+- GraphQL `POST business.facebook.com/api/graphql/`, `fb_api_req_friendly_name=NorthStarBusinessUnifiedScopingSelectorFirstAndZeroLevelScopesSectionAllZeroLevelScopesQuery`, `doc_id=37857269907251700` (`FBLS_PAGES_DOC_ID` để thay). Biến chính: `businessToolName "MBS_INBOX"`, `contextUri` là URL Hộp thư, `firstLevelScopeId` và `scopeIDs [..]` là id người dùng (`c_user`), `isPersonalAccount true`, `countLimit 201`, `fetchNumberForPersonalChildrenScopes 40`.
+- Biến bắt buộc `__relay_internal__pv__IsBusinessPortfolioOverviewLinkEnabledrelayprovider: true`. Thiếu nó server chỉ trả `missing_required_variable_value`, không nói tên biến; tên lấy từ module `<query>$Parameters` (`providedVariables`) trong JS `static.xx.fbcdn.net` mà trang Hộp thư nạp. `doc_id` cũng nằm ở module `<query>_facebookRelayOperation`. Đổi bản phát hành thì tìm lại hai module này.
+- Phản hồi: `data.viewer.meta_business_scoping.personal_scopes {count, page_info, edges[].node{scope_id, scope_name, scope_type "PAGE", scope_profile_picture{uri}}}`. `scope_id` chính là `asset_id`. Thử thật 01/11/2026 bằng `fbweb-ls pages` với phiên `default`: đủ 5 Trang, khớp `count`.
+- Trang thuộc portfolio doanh nghiệp nằm ở `business_scopes` của `NorthStarBusinessUnifiedScopingSelectorPopoverContainerAllFirstLevelScopesQuery` (`doc_id=28183223691347905`); tài khoản này có `count 0` nên chưa làm.
+
+## 🤖 Chế độ agent (`fbweb-ls agent`, omnichannel D18)
+
+Một tiến trình giữ nhiều phiên Facebook, mỗi Trang một listener, cấu hình lấy từ fb-bridge-web thay cho env. Chạy trên server3 là service `fbweb-agent` của omnichannel.
+
+- Phiên: `FBLS_LOGINS/<tên>/config.json` do `fb-login-ui` ghi khi admin bấm "Đăng nhập Facebook" ở kênh Fanpage Web (target `fbweb`). Agent chép cookie sang `FBLS_DATA/logins/<tên>/cookies.json` (một kho cookie cho mọi Trang của phiên), liệt kê Trang ngay, rồi 6 giờ một lần (lỗi thì 10 phút). Cookie nguồn đổi (đăng nhập lại) thì chép lại và khởi động lại các Trang của phiên.
+- Đồng bộ: `POST /agent/sync {agent, version, logins[{name, user_id, state, error, pages}]}` tới cổng ingest (long-poll 25 giây). Phản hồi `{version, pages[{account, page_id, login, send}], relist[]}`. Có gì mới (liệt kê xong, hết phiên) thì agent cắt long-poll để báo ngay. Cookie không lên server.
+- Mỗi Trang chạy đúng `Listener` như chế độ một Trang, cursor `FBLS_DATA/state-<page id>.json`. Đổi cấu hình thì dừng hẳn bản cũ trước khi chạy bản mới.
+
+Biến: `FBLS_AGENT` (tên agent, bắt buộc), `FBLS_LOGINS` (mặc định `/logins`), `FBLS_DATA`, `FBWEB_URL` (mặc định `http://fb-bridge-web:7008`), `FBWEB_TOKEN`, `FBLS_USER_AGENT`, `FBLS_PAGES_DOC_ID`. Chạy bằng uid 1000 như `fb-login-ui` (cookie quyền 600).
 
 ## ⚠️ Chưa biết, cần thử thật
 

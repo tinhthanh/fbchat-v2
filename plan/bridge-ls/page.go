@@ -51,6 +51,46 @@ type pageScan struct {
 }
 
 func parsePage(html []byte) (*PageInfo, error) {
+	info, err := scanPage(html)
+	if err != nil {
+		return nil, err
+	}
+	// Chỉ báo tên trường thiếu, không in giá trị.
+	var missing []string
+	for _, f := range []struct{ name, value string }{
+		{"appId", info.AppID}, {"USER_ID", info.UserID}, {"version", info.Version}, {"cursor", info.Cursor},
+	} {
+		if f.value == "" {
+			missing = append(missing, f.name)
+		}
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("inbox page is missing %s", strings.Join(missing, ", "))
+	}
+	return info, nil
+}
+
+// parseSession chỉ cần token form và USER_ID (liệt kê Trang, pages.go).
+func parseSession(html []byte) (*PageInfo, error) {
+	info, err := scanPage(html)
+	if err != nil {
+		return nil, err
+	}
+	var missing []string
+	for _, f := range []struct{ name, value string }{
+		{"USER_ID", info.UserID}, {"fb_dtsg", info.DTSG}, {"lsd", info.LSD},
+	} {
+		if f.value == "" {
+			missing = append(missing, f.name)
+		}
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("business page is missing %s", strings.Join(missing, ", "))
+	}
+	return info, nil
+}
+
+func scanPage(html []byte) (*PageInfo, error) {
 	s := &pageScan{info: PageInfo{Contacts: map[string]string{}}}
 	for _, m := range jsonScriptRe.FindAllSubmatch(html, -1) {
 		body := m[1]
@@ -69,18 +109,6 @@ func parsePage(html []byte) (*PageInfo, error) {
 	}
 	if info.UserID == "0" {
 		return nil, errLoggedOut
-	}
-	// Chỉ báo tên trường thiếu, không in giá trị.
-	var missing []string
-	for _, f := range []struct{ name, value string }{
-		{"appId", info.AppID}, {"USER_ID", info.UserID}, {"version", info.Version}, {"cursor", info.Cursor},
-	} {
-		if f.value == "" {
-			missing = append(missing, f.name)
-		}
-	}
-	if len(missing) > 0 {
-		return nil, fmt.Errorf("inbox page is missing %s", strings.Join(missing, ", "))
 	}
 	return info, nil
 }
@@ -163,7 +191,23 @@ func (s *pageScan) lightspeed(calls []call) {
 
 // fetchPage tải trang Hộp thư bằng cookie phiên, header như Chrome mở trang.
 func fetchPage(ctx context.Context, client *req.Client, jar *CookieJar, ua UserAgent, pageID string) (*PageInfo, error) {
-	url := "https://business.facebook.com/latest/inbox/all/?asset_id=" + pageID
+	return fetchParsed(ctx, client, jar, ua, inboxURL+"?asset_id="+pageID, parsePage)
+}
+
+// fetchSession tải Hộp thư không chọn Trang, chỉ lấy token form (pages.go).
+func fetchSession(ctx context.Context, client *req.Client, jar *CookieJar, ua UserAgent) (*PageInfo, error) {
+	return fetchParsed(ctx, client, jar, ua, inboxURL, parseSession)
+}
+
+const inboxURL = "https://business.facebook.com/latest/inbox/all/"
+
+func fetchParsed(ctx context.Context, client *req.Client, jar *CookieJar, ua UserAgent, url string, parse func([]byte) (*PageInfo, error)) (*PageInfo, error) {
+	return fetchParsedHop(ctx, client, jar, ua, url, parse, 1)
+}
+
+// Hộp thư không có asset_id thì Business Suite chuyển sang Trang mặc định
+// (thử 01/11/2026): đi theo tối đa một lần, chỉ trong /latest/ của business.facebook.com.
+func fetchParsedHop(ctx context.Context, client *req.Client, jar *CookieJar, ua UserAgent, url string, parse func([]byte) (*PageInfo, error), hops int) (*PageInfo, error) {
 	resp, err := client.R().SetContext(ctx).
 		SetHeaders(ua.navigationHeaders()).
 		SetHeader("cookie", jar.Header()).
@@ -179,11 +223,14 @@ func fetchPage(ctx context.Context, client *req.Client, jar *CookieJar, ua UserA
 		if strings.Contains(loc, "login") || strings.Contains(loc, "checkpoint") {
 			return nil, errLoggedOut
 		}
+		if hops > 0 && strings.HasPrefix(loc, lsOrigin+"/latest/") {
+			return fetchParsedHop(ctx, client, jar, ua, loc, parse, hops-1)
+		}
 		return nil, fmt.Errorf("fetch inbox page: redirect to %s", redactURL(loc))
 	case resp.StatusCode != http.StatusOK:
 		return nil, fmt.Errorf("fetch inbox page: HTTP %d", resp.StatusCode)
 	}
-	info, err := parsePage(resp.Bytes())
+	info, err := parse(resp.Bytes())
 	if err != nil {
 		return nil, fmt.Errorf("%w (%s)", err, describeHTML(resp.Bytes()))
 	}

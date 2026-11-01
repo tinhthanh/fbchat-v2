@@ -16,8 +16,10 @@ RUN apk add --no-cache \
         xvfb \
     && addgroup -g 1000 fbchat \
     && adduser -D -u 1000 -G fbchat fbchat \
-    && mkdir -p /data /etc/chromium/policies/managed \
-    && chown fbchat:fbchat /data \
+    # /fbweb: phiên Fanpage Web (target fbweb, volume riêng mà agent fbweb-ls đọc).
+    && mkdir -p /data /fbweb /etc/chromium/policies/managed \
+    && chown fbchat:fbchat /data /fbweb \
+    && chmod 700 /fbweb \
     # Chặn DevTools (cửa sổ mở nhầm sẽ che trang đăng nhập) và không lưu mật khẩu.
     && echo '{"DeveloperToolsAvailability": 2, "PasswordManagerEnabled": false}' \
         > /etc/chromium/policies/managed/fbchat.json

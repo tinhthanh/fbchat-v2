@@ -3,8 +3,10 @@
 // extension của fbweb-browser. Dùng phiên (cookie) đã đăng nhập trong
 // fbweb-browser. Xem README.md.
 //
-//	fbweb-ls          chạy
+//	fbweb-ls          chạy một Trang (env FBWEB_PAGE_ID)
+//	fbweb-ls agent    nhiều phiên, nhiều Trang, cấu hình từ fb-bridge-web (agent.go)
 //	fbweb-ls check    chỉ tải trang Hộp thư một lần, in những gì đọc được (không mở socket)
+//	fbweb-ls pages    liệt kê các Trang của phiên (id, tên), không mở socket
 package main
 
 import (
@@ -39,6 +41,9 @@ func main() {
 }
 
 func run(log *slog.Logger) error {
+	if len(os.Args) > 1 && os.Args[1] == "agent" {
+		return runAgent(log)
+	}
 	cfg := Config{
 		PageID:    os.Getenv("FBWEB_PAGE_ID"),
 		PageName:  os.Getenv("FBLS_PAGE_NAME"),
@@ -65,6 +70,16 @@ func run(log *slog.Logger) error {
 	if len(os.Args) > 1 && os.Args[1] == "check" {
 		return check(ctx, httpClient, jar, cfg)
 	}
+	if len(os.Args) > 1 && os.Args[1] == "pages" {
+		pages, err := listPages(ctx, httpClient, jar, cfg.UserAgent)
+		if err != nil {
+			return err
+		}
+		for _, p := range pages {
+			fmt.Printf("%s\t%s\n", p.ID, p.Name)
+		}
+		return nil
+	}
 
 	l := NewListener(cfg, jar, httpClient, log)
 	fwd := Forwarder{
@@ -81,6 +96,32 @@ func run(log *slog.Logger) error {
 	l.fwd = NewForwarder(fwd, newDownloadClient(), jar, cfg.UserAgent, log)
 	log.Info("fbweb-ls started", "page", cfg.PageID, "dry_run", fwd.DryRun, "send", cfg.Send && !fwd.DryRun)
 	l.Run(ctx)
+	return nil
+}
+
+// runAgent: nhiều phiên, nhiều Trang, cấu hình từ fb-bridge-web (agent.go).
+func runAgent(log *slog.Logger) error {
+	cfg := AgentConfig{
+		Name:      os.Getenv("FBLS_AGENT"),
+		LoginsDir: env("FBLS_LOGINS", "/logins"),
+		DataDir:   env("FBLS_DATA", "/data"),
+		URL:       env("FBWEB_URL", "http://fb-bridge-web:7008"),
+		Token:     os.Getenv("FBWEB_TOKEN"),
+		UserAgent: defaultUserAgent,
+	}
+	if ua := os.Getenv("FBLS_USER_AGENT"); ua != "" {
+		cfg.UserAgent.UA = ua
+	}
+	if !loginNamePattern.MatchString(cfg.Name) {
+		return fmt.Errorf("FBLS_AGENT is required (letters, digits, . _ -)")
+	}
+	if len(cfg.Token) < 32 {
+		return fmt.Errorf("FBWEB_TOKEN (32+ characters) is required")
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	log.Info("fbweb-ls agent started", "agent", cfg.Name)
+	NewAgent(cfg, log).Run(ctx)
 	return nil
 }
 

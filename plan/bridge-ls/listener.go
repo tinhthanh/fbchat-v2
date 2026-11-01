@@ -89,6 +89,7 @@ type Listener struct {
 	caughtUp atomic.Bool
 
 	connected atomic.Bool
+	loggedOut atomic.Bool // trang Hộp thư báo hết phiên; agent báo phiên cần đăng nhập lại
 }
 
 func NewListener(cfg Config, jar *CookieJar, httpClient *req.Client, log *slog.Logger) *Listener {
@@ -147,7 +148,8 @@ func (l *Listener) Run(ctx context.Context) {
 			if err := l.loadPage(ctx); err != nil {
 				if errors.Is(err, errLoggedOut) {
 					// Không thử dồn dập: đăng nhập lại là việc của người dùng.
-					l.log.Error("facebook session is logged out; log in again in fbweb-browser and export cookies")
+					l.loggedOut.Store(true)
+					l.log.Error("facebook session is logged out; log in again")
 					select {
 					case <-ctx.Done():
 					case <-time.After(30 * time.Minute):
@@ -185,6 +187,7 @@ func (l *Listener) loadPage(ctx context.Context) error {
 	if info.UserID != l.jar.Get("c_user") {
 		return errors.New("inbox page USER_ID does not match the c_user cookie")
 	}
+	l.loggedOut.Store(false)
 	l.applyPage(info)
 	return nil
 }

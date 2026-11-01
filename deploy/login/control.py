@@ -1,12 +1,15 @@
 """Dịch vụ trình duyệt đăng nhập Facebook theo yêu cầu (trang "Tài khoản kênh").
 
 Chạy thường trực nhưng chỉ bật Chromium/noVNC khi gateway yêu cầu:
-  POST   /session  {"account": "<tên>"}  -> chạy extract_cookie.py (FORCE_LOGIN=1)
-  GET    /session                         -> {"account", "status", "message"}
+  POST   /session  {"account": "<tên>", "target": "facebook" | "fbweb"}
+                                          -> chạy extract_cookie.py (FORCE_LOGIN=1)
+  GET    /session                         -> {"account", "target", "status", "message"}
   DELETE /session                         -> dừng phiên đang chạy
 noVNC (cổng 6080) chỉ tồn tại khi có phiên; gateway proxy nó sau khi kiểm tra quyền
 admin Libredesk. Mỗi lúc một phiên (một màn hình ảo), hồ sơ Chromium được xoá trước
 mỗi phiên để tài khoản sau không nhận nhầm cookie của tài khoản trước.
+target "facebook" (mặc định) ghi cookie cho fb-bot (/data/accounts/<tên>), "fbweb"
+ghi cho agent Fanpage Web (FBWEB_LOGINS_DIR/<tên>, volume riêng; omnichannel D18).
 Không bao giờ in cookie ra log.
 """
 
@@ -34,19 +37,31 @@ PROFILE_DIR = Path(os.environ.get("CHROMIUM_PROFILE", "/tmp/chromium-profile"))
 ACCOUNT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 MAX_BODY = 4096
 VNC_PORT = 6080
+FBWEB_LOGINS_DIR = Path(os.environ.get("FBWEB_LOGINS_DIR", "/fbweb"))
+TARGETS = ("facebook", "fbweb")
 
 _lock = threading.Lock()
 _proc: subprocess.Popen[bytes] | None = None
-_state: dict[str, Any] = {"account": "", "status": "idle", "message": "", "at": 0.0}
+_state: dict[str, Any] = {
+    "account": "",
+    "target": "facebook",
+    "status": "idle",
+    "message": "",
+    "at": 0.0,
+}
 
 
 def log(message: str) -> None:
     print(f"[control] {message}", flush=True)
 
 
-def _set(status: str, message: str, account: str | None = None) -> None:
+def _set(
+    status: str, message: str, account: str | None = None, target: str | None = None
+) -> None:
     if account is not None:
         _state["account"] = account
+    if target is not None:
+        _state["target"] = target
     _state.update(status=status, message=message, at=time.time())
 
 
@@ -98,22 +113,33 @@ def snapshot() -> dict[str, Any]:
     return state
 
 
-def start(account: str) -> tuple[int, dict[str, Any]]:
+def start(account: str, target: str = "facebook") -> tuple[int, dict[str, Any]]:
     global _proc
     with _lock:
         running = _proc is not None and _proc.poll() is None
-        if running and _state["account"] != account:
+        if running and (_state["account"], _state["target"]) != (account, target):
             return 409, {"error": f"Đang có phiên đăng nhập cho {_state['account']}."}
         if not running:
             shutil.rmtree(PROFILE_DIR, ignore_errors=True)
             env = {**os.environ, "ACCOUNT": account, "FORCE_LOGIN": "1"}
+            if target == "fbweb":
+                if not FBWEB_LOGINS_DIR.is_dir():
+                    return 501, {
+                        "error": "Chưa gắn volume phiên Fanpage Web cho fb-login-ui."
+                    }
+                env["CONFIG_PATH"] = str(FBWEB_LOGINS_DIR / account / "config.json")
             _proc = subprocess.Popen(
                 [sys.executable, str(SCRIPT)],
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
             )
-            _set("running", "Đăng nhập Facebook trong khung trình duyệt.", account)
+            _set(
+                "running",
+                "Đăng nhập Facebook trong khung trình duyệt.",
+                account,
+                target,
+            )
             threading.Thread(target=_watch, args=(_proc, account), daemon=True).start()
             log(f"Bắt đầu phiên đăng nhập cho {account}.")
     # Ngoài khóa: snapshot() tự lấy khóa.
@@ -178,7 +204,10 @@ class Handler(BaseHTTPRequestHandler):
         account = payload.get("account") if isinstance(payload, dict) else None
         if not isinstance(account, str) or not ACCOUNT_PATTERN.match(account):
             return self._reply(400, {"error": "Tên tài khoản không hợp lệ."})
-        self._reply(*start(account))
+        target = payload.get("target") or "facebook"
+        if target not in TARGETS:
+            return self._reply(400, {"error": "target không hợp lệ."})
+        self._reply(*start(account, target))
 
     def do_DELETE(self) -> None:  # noqa: N802
         if self.path != "/session":

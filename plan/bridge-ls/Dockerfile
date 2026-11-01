@@ -13,6 +13,7 @@ RUN --mount=type=cache,target=/root/go/pkg/mod \
 FROM scratch
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=build /out/fbweb-ls /fbweb-ls
-COPY --from=build --chown=65532:65532 /out/data /data
-USER 65532:65532
+# uid 1000 như fb-login-ui: chế độ agent đọc cookie fb-login-ui ghi (quyền 600).
+COPY --from=build --chown=1000:1000 /out/data /data
+USER 1000:1000
 ENTRYPOINT ["/fbweb-ls"]
