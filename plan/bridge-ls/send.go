@@ -118,7 +118,9 @@ func (l *Listener) sendLoop(ctx context.Context) {
 			continue
 		}
 		res := l.sendJob(ctx, *job)
-		if res.OK {
+		if res.OK && job.Kind == "react" {
+			l.log.Info("reaction sent", "job", res.ID)
+		} else if res.OK {
 			l.log.Info("message sent", "job", res.ID, "mid", res.Mid)
 		} else {
 			l.log.Warn("message not sent", "job", res.ID, "retry", res.Retry, "unknown", res.Unknown, "error", res.Error)
