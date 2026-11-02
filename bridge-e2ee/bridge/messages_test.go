@@ -8,6 +8,7 @@ import (
 
 	"go.mau.fi/whatsmeow/proto/waCommon"
 	waTypes "go.mau.fi/whatsmeow/types"
+	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -167,5 +168,21 @@ func TestBuildE2EEReactionHasSenderTimestamp(t *testing.T) {
 	}
 	if removed := buildE2EEReaction(key, "", 1).GetPayload().GetContent().GetReactionMessage(); removed.Text == nil || removed.GetText() != "" {
 		t.Fatalf("removal must send an empty text, got %+v", removed)
+	}
+}
+
+func TestExtractE2EEReactionTimestamp(t *testing.T) {
+	key := &waCommon.MessageKey{ID: proto.String("mid-1")}
+	sent := &events.FBMessage{Message: buildE2EEReaction(key, "❤", 1793600000123)}
+	if got := extractE2EEReactionTimestamp(sent); got != 1793600000123 {
+		t.Fatalf("timestamp %d", got)
+	}
+	bare := buildE2EEReaction(key, "❤", 0)
+	bare.GetPayload().GetContent().GetReactionMessage().SenderTimestampMS = nil
+	if got := extractE2EEReactionTimestamp(&events.FBMessage{Message: bare}); got != 0 {
+		t.Fatalf("missing timestamp gave %d", got)
+	}
+	if got := extractE2EEReactionTimestamp(&events.FBMessage{}); got != 0 {
+		t.Fatalf("nil message gave %d", got)
 	}
 }

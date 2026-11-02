@@ -58,6 +58,8 @@ UNDECRYPTABLE_TEXT = (
 OWNER = "Chủ tài khoản"
 # mediaType cho downloadE2EEMedia (bridge nhận image/video/audio/voice/file/sticker).
 E2EE_MEDIA_TYPE = {"gif": "video"}
+# Dấu trong ghi chú cảm xúc thiếu thời điểm thả (canary tìm đúng chuỗi này).
+MISSING_REACTION_TS = "⚠️ thiếu thời điểm thả, app Messenger không hiện"
 EXT_BY_MIME = {
     "image/jpeg": "jpg",
     "image/png": "png",
@@ -809,6 +811,15 @@ class GatewayLink:
             )
             target = f" vào tin «{cached['summary']}»" if cached.get("summary") else ""
             emoji = data.get("reaction") or "(bỏ cảm xúc)"
+            # Bridge gửi senderTimestampMs = 0 khi gói cảm xúc thiếu thời điểm thả:
+            # app Messenger bỏ qua cảm xúc đó dù bridge khác vẫn đọc được. Canary
+            # thả cảm xúc giữa hai tài khoản thử và trượt khi thấy dấu này.
+            if kind == "e2eeReaction" and data.get("senderTimestampMs", 1) in (0, None):
+                target += f" {MISSING_REACTION_TS}"
+                self.log(
+                    "gateway",
+                    "❌ Cảm xúc E2EE thiếu senderTimestampMs: app Messenger sẽ không hiện.",
+                )
             # Gateway gắn cảm xúc lên đúng tin trong Libredesk (huy hiệu như
             # Messenger); không tìm được tin thì ghi chú bằng `text` như cũ.
             await self._post_event(

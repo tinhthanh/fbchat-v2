@@ -1270,3 +1270,23 @@ def test_audio_seconds_reads_mp4_and_ogg() -> None:
     assert (
         method == "sendE2EEAudio" and params["ptt"] is True and params["duration"] == 3
     )
+
+
+@pytest.mark.asyncio
+async def test_e2ee_reaction_without_sender_timestamp_is_flagged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(gateway_link._get_user_info, "func", _names)
+    link, calls = _recording_link()
+    bot = _Bot()
+    base = {"chatJid": "7@msgr", "messageId": "m3", "reaction": "❤", "senderId": 7}
+    for extra in ({"senderTimestampMs": 1793600000123}, {"senderTimestampMs": 0}, {}):
+        await link.handle_meta(
+            "acc1", bot, {"type": "e2eeReaction", "data": {**base, **extra}}
+        )
+    texts = [c[1]["text"] for c in calls if c[0] == "/v1/event"]
+    assert [gateway_link.MISSING_REACTION_TS in t for t in texts] == [
+        False,
+        True,
+        False,
+    ]

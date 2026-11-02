@@ -959,6 +959,9 @@ func (c *Client) handleE2EEEvent(evt interface{}) {
 				"senderJid": e.Info.Sender.String(),
 				"senderId":  senderID,
 				"reaction":  reaction, // Empty means unreaction
+				// 0 means the sender left it out; the Messenger apps then
+				// do not show the reaction (fb-bot flags it for the canary).
+				"senderTimestampMs": extractE2EEReactionTimestamp(e),
 			})
 			return
 		}
@@ -1150,6 +1153,16 @@ func extractE2EEReaction(e *events.FBMessage) string {
 	}
 
 	return ""
+}
+
+// extractE2EEReactionTimestamp returns the reaction's SenderTimestampMS, 0 if absent.
+func extractE2EEReactionTimestamp(e *events.FBMessage) int64 {
+	if ca, ok := e.Message.(*waConsumerApplication.ConsumerApplication); ok {
+		if rm, ok := ca.GetPayload().GetContent().GetContent().(*waConsumerApplication.ConsumerApplication_Content_ReactionMessage); ok {
+			return rm.ReactionMessage.GetSenderTimestampMS()
+		}
+	}
+	return 0
 }
 
 // extractE2EEReactionMessageID extracts the message ID that was reacted to
