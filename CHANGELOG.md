@@ -54,6 +54,10 @@ phiên bản tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
 ### Fixed
 
+- Bridge: sticker kho của Messenger trong chat E2EE không có khoá tải, chỉ có
+  `receiverFetchID`; bridge nay lấy URL ảnh qua `FetchReceiverFetchMedia` (như
+  mautrix-meta) và điền `url`, `mimeType`, kích thước vào attachment, nên
+  `downloadMedia` tải được thay vì chỉ có chữ `[Sticker]`.
 - Test danh tính trình duyệt không còn hỏng CI khi job Python không có
   submodule `bridge-e2ee/meta`: job Go kiểm tra cùng điều kiện
   (`bridge-e2ee/identity_test.go`), test Python bỏ qua khi thiếu submodule.

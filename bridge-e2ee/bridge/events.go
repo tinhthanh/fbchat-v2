@@ -1711,6 +1711,14 @@ func (c *Client) extractE2EEDocumentAttachment(doc *waConsumerApplication.Consum
 }
 
 // extractE2EEStickerAttachment extracts sticker attachment with full metadata
+// receiverFetchTimeout bounds the extra GraphQL round trip for a catalog sticker.
+const receiverFetchTimeout = 20 * time.Second
+
+// fetchReceiverFetchMedia is replaced in tests.
+var fetchReceiverFetchMedia = func(ctx context.Context, client *messagix.Client, id string) (*messagix.ReceiverFetchMedia, error) {
+	return client.FetchReceiverFetchMedia(ctx, id)
+}
+
 func (c *Client) extractE2EEStickerAttachment(sticker *waConsumerApplication.ConsumerApplication_StickerMessage) *Attachment {
 	att := &Attachment{
 		Type: "sticker",
@@ -1722,6 +1730,13 @@ func (c *Client) extractE2EEStickerAttachment(sticker *waConsumerApplication.Con
 		if ancillary := transport.GetAncillary(); ancillary != nil {
 			att.Width = int(ancillary.GetWidth())
 			att.Height = int(ancillary.GetHeight())
+			// Messenger catalog stickers carry no media keys, only a receiver
+			// fetch ID resolved through GraphQL (as mautrix-meta does), which
+			// gives a CDN URL that downloadMedia can fetch.
+			if id := ancillary.GetReceiverFetchID(); id != "" {
+				c.resolveReceiverFetchSticker(att, id)
+				return att
+			}
 		}
 		if integral := transport.GetIntegral(); integral != nil {
 			if waTransport := integral.GetTransport(); waTransport != nil {
@@ -1742,6 +1757,24 @@ func (c *Client) extractE2EEStickerAttachment(sticker *waConsumerApplication.Con
 	}
 
 	return att
+}
+
+func (c *Client) resolveReceiverFetchSticker(att *Attachment, id string) {
+	if c.Messagix == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), receiverFetchTimeout)
+	defer cancel()
+	media, err := fetchReceiverFetchMedia(ctx, c.Messagix, id)
+	if err != nil {
+		c.Logger.Warn().Err(err).Msg("Failed to resolve E2EE sticker media")
+		return
+	}
+	att.URL = media.URL
+	att.MimeType = media.MimeType
+	if media.Width > 0 && media.Height > 0 {
+		att.Width, att.Height = media.Width, media.Height
+	}
 }
 
 // extractURLFromLPHP extracts the actual URL from Facebook's l.php redirect URL
