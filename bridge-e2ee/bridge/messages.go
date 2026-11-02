@@ -257,24 +257,32 @@ func (c *Client) SendE2EEReaction(chatJIDStr, messageID, senderJIDStr, emoji str
 	}
 
 	msgKey := e2eeClient.BuildMessageKey(chatJID, senderJID, messageID)
-	reactionMsg := &waConsumerApplication.ConsumerApplication{
+	reactionMsg := buildE2EEReaction(msgKey, emoji, time.Now().UnixMilli())
+
+	reactionID := strconv.FormatInt(time.Now().UnixNano(), 10)
+	_, err = e2eeClient.SendFBMessage(c.ctx, chatJID, reactionMsg, nil, whatsmeow.SendRequestExtra{ID: reactionID})
+	return err
+}
+
+// buildE2EEReaction wraps a reaction ("" removes it) like mautrix-meta does.
+// The Messenger apps ignore a reaction without SenderTimestampMS, although
+// another bridge still parses it.
+func buildE2EEReaction(key *waCommon.MessageKey, emoji string, timestampMS int64) *waConsumerApplication.ConsumerApplication {
+	return &waConsumerApplication.ConsumerApplication{
 		Payload: &waConsumerApplication.ConsumerApplication_Payload{
 			Payload: &waConsumerApplication.ConsumerApplication_Payload_Content{
 				Content: &waConsumerApplication.ConsumerApplication_Content{
 					Content: &waConsumerApplication.ConsumerApplication_Content_ReactionMessage{
 						ReactionMessage: &waConsumerApplication.ConsumerApplication_ReactionMessage{
-							Key:  msgKey,
-							Text: &emoji,
+							Key:               key,
+							Text:              &emoji,
+							SenderTimestampMS: &timestampMS,
 						},
 					},
 				},
 			},
 		},
 	}
-
-	reactionID := strconv.FormatInt(time.Now().UnixNano(), 10)
-	_, err = e2eeClient.SendFBMessage(c.ctx, chatJID, reactionMsg, nil, whatsmeow.SendRequestExtra{ID: reactionID})
-	return err
 }
 
 // EditMessage edits a message

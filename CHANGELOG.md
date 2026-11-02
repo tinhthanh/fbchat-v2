@@ -54,6 +54,9 @@ phiên bản tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
 ### Fixed
 
+- Bridge: cảm xúc E2EE (`sendE2EEReaction`) nay có `senderTimestampMs` như
+  mautrix-meta. Thiếu trường này thì app Messenger không hiện cảm xúc, dù
+  bridge khác vẫn đọc được.
 - Bridge: sticker kho của Messenger trong chat E2EE không có khoá tải, chỉ có
   `receiverFetchID`; bridge nay lấy URL ảnh qua `FetchReceiverFetchMedia` (như
   mautrix-meta) và điền `url`, `mimeType`, kích thước vào attachment, nên

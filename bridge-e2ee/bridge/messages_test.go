@@ -6,7 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"go.mau.fi/whatsmeow/proto/waCommon"
 	waTypes "go.mau.fi/whatsmeow/types"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestUnknownE2EESendResultDoesNotClaimDelivery(t *testing.T) {
@@ -153,5 +155,17 @@ func TestE2EETypingRejectsCanceledLifecycleAndInvalidJID(t *testing.T) {
 	client = &Client{ctx: context.Background()}
 	if err := client.sendE2EETyping(sender, "invalid:jid:device@msgr", true); err == nil {
 		t.Fatal("sendE2EETyping() accepted an invalid JID")
+	}
+}
+
+func TestBuildE2EEReactionHasSenderTimestamp(t *testing.T) {
+	key := &waCommon.MessageKey{ID: proto.String("mid-1")}
+	msg := buildE2EEReaction(key, "❤", 1793600000123)
+	r := msg.GetPayload().GetContent().GetReactionMessage()
+	if r.GetKey().GetID() != "mid-1" || r.GetText() != "❤" || r.GetSenderTimestampMS() != 1793600000123 {
+		t.Fatalf("reaction %+v", r)
+	}
+	if removed := buildE2EEReaction(key, "", 1).GetPayload().GetContent().GetReactionMessage(); removed.Text == nil || removed.GetText() != "" {
+		t.Fatalf("removal must send an empty text, got %+v", removed)
 	}
 }
