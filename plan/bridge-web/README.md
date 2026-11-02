@@ -2,7 +2,7 @@
 
 Ghi chú cho session sau: script làm gì, dữ liệu đi qua đâu, cách bắt lại frame khi Meta đổi định dạng. Không liên quan tới `omnichannel/` hay `fbpage-bot` (bot đó dùng Graph API chính thức).
 
-> **Không dùng nữa (02/11/2026)**: cách treo tab này đã được thay bằng `fbweb-ls` (thư mục `fbweb-ls/` của repo omnichannel, quyết định D20): nhận và gửi tin không cần trình duyệt, đăng nhập lại trên trang Tài khoản kênh. Thư mục này chỉ để tham khảo; parser JS không còn được giữ đồng bộ với bản Go. Container `fbweb-browser` trên Mac xoá ở đợt dọn khoảng 04/11/2026.
+> **Không dùng nữa (02/11/2026)**: cách treo tab này đã được thay bằng `fbweb-ls` (thư mục `fbweb-ls/` của repo omnichannel, quyết định D20): nhận và gửi tin không cần trình duyệt, đăng nhập lại trên trang Tài khoản kênh. Thư mục này chỉ để tham khảo; parser JS không còn được giữ đồng bộ với bản Go. Container `fbweb-browser` và profile của nó trên Mac đã xoá ngày 02/11/2026; muốn chạy lại thì build từ `browser/` và đăng nhập lại.
 
 ## 📂 Nội dung
 
