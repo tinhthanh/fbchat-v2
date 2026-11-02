@@ -1,5 +1,7 @@
 # bridge-ls - nghe tin Fanpage thẳng trên socket Lightspeed (không trình duyệt)
 
+> **Đã chuyển (02/11/2026)**: `fbweb-ls` nay là thư mục `fbweb-ls/` của repo omnichannel (service `fbweb-agent`, chỉ chế độ agent, dùng mautrix-meta bản phát hành), quyết định D20 ở `omnichannel/docs/DECISIONS.md`. Bản ở đây không còn được sửa; chỉ giữ cho đường lui trên Mac (container `ls`, `data/`) tới đợt dọn khoảng 04/11/2026 rồi xoá.
+
 `fbweb-ls` là chương trình Go nhỏ thay cho `../bridge-web/browser` (Chromium khoảng 260 MiB). Nó tự mở `wss://gateway.facebook.com/ws/lightspeed` bằng phiên đã đăng nhập trong fbweb-browser, đọc frame Lightspeed của hộp thư Trang và gửi sang `fb-bridge-web` của omnichannel đúng như extension của trình duyệt (`/ingest`, `/heartbeat`). omnichannel không phải đổi gì.
 
 **Trạng thái 01/11/2026:** chạy thật thay cho fbweb-browser từ 31/10 16:00, Trang VetGo; khoảng 11-14 MiB RAM, CPU 0,1%. Đã thử thật trên Trang thử (mục dưới): chữ, ảnh, PDF, tin thoại, video (kể cả 5 MB), sticker, Like, trả lời tin (kể cả tin của Trang), sửa tin, cảm xúc, khách mới, lấy lại tin sau khi mất kết nối (2 phút trên Trang thử, 11 giờ 38 phút trên Trang VetGo). Gửi từ Libredesk (`FBLS_SEND=1`, chỉ Trang thử): chữ, trích dẫn, ảnh, video, mp3, PDF, Word, Excel, cảm xúc; mục "Gửi tin". Chưa chạy lâu. Chế độ agent (nhiều phiên, nhiều Trang, cấu hình trên trang Tài khoản kênh, D18) đã viết và test bằng server giả; liệt kê Trang đã thử thật, nghe Trang qua agent chưa chạy thật.

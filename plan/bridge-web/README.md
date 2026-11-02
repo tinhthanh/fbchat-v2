@@ -2,7 +2,7 @@
 
 Ghi chú cho session sau: script làm gì, dữ liệu đi qua đâu, cách bắt lại frame khi Meta đổi định dạng. Không liên quan tới `omnichannel/` hay `fbpage-bot` (bot đó dùng Graph API chính thức).
 
-Bản không cần trình duyệt (chương trình Go tự mở socket Lightspeed, đang thử): [`../bridge-ls/README.md`](../bridge-ls/README.md). Parse frame ở hai nơi (`bs-inbox-listener.js` và `bridge-ls/lsparse.go`), sửa một bên thì sửa cả bên kia. Khác biệt có chủ ý: bản Go phát thêm `page_message` (tin Trang gửi, kèm `otid`) cho ghi chú "chủ tài khoản trả lời" và phần gửi tin; bản JS vẫn bỏ tin của Trang.
+> **Không dùng nữa (02/11/2026)**: cách treo tab này đã được thay bằng `fbweb-ls` (thư mục `fbweb-ls/` của repo omnichannel, quyết định D20): nhận và gửi tin không cần trình duyệt, đăng nhập lại trên trang Tài khoản kênh. Thư mục này chỉ để tham khảo; parser JS không còn được giữ đồng bộ với bản Go. Container `fbweb-browser` trên Mac xoá ở đợt dọn khoảng 04/11/2026.
 
 ## 📂 Nội dung
 
