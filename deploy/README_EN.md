@@ -138,6 +138,8 @@ Browser sign-in uses the `fb-login-ui` service (`login/` image, `control.py` com
 
 `AccountBot` stores the E2EE device state in `/data/accounts/<name>/e2ee_device.json` (mode `0600`). Upstream keeps it in memory by default (`e2ee_memory_only=True`): every restart becomes a new E2EE device and incoming messages often fail with `E2EE message could not be decrypted or was unavailable`. Set `FBCHAT_E2EE_PERSIST=0` to restore the upstream behaviour. The file holds the account's encryption keys: do not copy it out of the volume.
 
+Payload debugging: `FBBOT_TRACE=acc2,shop2` (comma-separated account names) writes every raw listener event, including types the bot ignores (such as call signals), to `/data/trace/<name>-<UTC time>.jsonl` (mode `0600`, at most 20 MiB per file). The file holds message content: enable it only for test accounts, then delete the file and unset the variable.
+
 ## 🔄 Syncing with upstream
 
 The shared process for every fork in the omnichannel system (separate branch, checks, canary, re-pinning, known traps): `omnichannel/docs/UPSTREAM.md`.

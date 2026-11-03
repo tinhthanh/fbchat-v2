@@ -138,6 +138,8 @@ Tên/ảnh của chính tài khoản lấy từ `/chat/user_info`; một số t�
 
 `AccountBot` lưu trạng thái thiết bị E2EE vào `/data/accounts/<tên>/e2ee_device.json` (quyền `0600`). Upstream mặc định giữ trạng thái này trong RAM (`e2ee_memory_only=True`): mỗi lần restart là một thiết bị E2EE mới và tin đến thường báo `E2EE message could not be decrypted or was unavailable`. Đặt `FBCHAT_E2EE_PERSIST=0` để quay lại hành vi upstream. File này là khóa mã hóa của tài khoản: không copy ra ngoài volume.
 
+Debug payload: `FBBOT_TRACE=acc2,shop2` (tên tài khoản, cách nhau bởi dấu phẩy) ghi mọi sự kiện thô của listener, kể cả loại bot đang bỏ qua (vd. tín hiệu cuộc gọi), vào `/data/trace/<tên>-<giờ UTC>.jsonl` (quyền `0600`, tối đa 20 MiB mỗi tệp). Tệp có nội dung tin nhắn: chỉ bật cho tài khoản thử, xoá tệp và tắt biến khi xong.
+
 ## 🔄 Đồng bộ với upstream
 
 Quy trình chung cho mọi fork của hệ thống omnichannel (nhánh riêng, kiểm tra, canary, ghim lại, bẫy đã gặp): `omnichannel/docs/UPSTREAM.md`.

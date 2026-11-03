@@ -552,3 +552,28 @@ async def test_e2ee_reconnect_without_transport_connected_restores_running(
     bot._record_lifecycle({"type": "e2eeConnected"})
     await asyncio.sleep(0)
     assert len(multi_main.account_history("acc1").items) == before
+
+
+def test_event_trace_only_for_listed_accounts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(multi_main, "TRACE_ACCOUNTS", {"acc2"})
+    monkeypatch.setattr(multi_main, "TRACE_DIR", tmp_path / "trace")
+    assert multi_main.open_trace("default") is None
+
+    trace = multi_main.open_trace("acc2")
+    assert trace is not None
+    trace.write({"type": "raw", "data": {"type": "CallOffer"}})
+    lines = trace.path.read_text(encoding="utf-8").splitlines()
+    assert json.loads(lines[0])["event"]["data"]["type"] == "CallOffer"
+    assert trace.path.stat().st_mode & 0o777 == 0o600
+
+
+def test_event_trace_stops_at_size_cap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(multi_main, "TRACE_MAX_BYTES", 100)
+    trace = multi_main.EventTrace(tmp_path / "t.jsonl")
+    for _ in range(5):
+        trace.write({"type": "message", "data": "x" * 30})
+    assert len(trace.path.read_text(encoding="utf-8").splitlines()) == 1

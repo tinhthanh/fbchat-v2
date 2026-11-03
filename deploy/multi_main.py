@@ -25,6 +25,7 @@ import os
 import re
 import shutil
 import tempfile
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -79,6 +80,16 @@ E2EE_PERSIST = os.environ.get("FBCHAT_E2EE_PERSIST", "1").lower() not in {
 # Có GATEWAY_URL: tin khách được chuyển tới omnichannel gateway và lệnh /ping...
 # bị tắt (đặt BOT_COMMANDS=1 để bật lại).
 COMMANDS_FLAG = os.environ.get("BOT_COMMANDS", "").lower() in {"1", "true", "yes"}
+# Ghi mọi sự kiện thô của listener (cả loại bot đang bỏ qua, vd. cuộc gọi) để
+# debug payload. Chỉ tài khoản thử: tệp có nội dung tin nhắn. Danh sách tên cách
+# nhau bởi dấu phẩy; mỗi tài khoản một tệp JSON Lines trong /data/trace, quyền 600.
+TRACE_ACCOUNTS = {
+    name.strip()
+    for name in os.environ.get("FBBOT_TRACE", "").split(",")
+    if name.strip()
+}
+TRACE_DIR = ACCOUNTS_DIR.parent / "trace"
+TRACE_MAX_BYTES = 20 << 20
 _gateway: GatewayLink | None = None
 
 _account_states: dict[str, str] = {}
@@ -148,6 +159,45 @@ def log(tag: str, message: str) -> None:
     _upstream_log(f"{label}] [{tag}" if label else tag, message)
 
 
+class EventTrace:
+    """Tệp JSON Lines của FBBOT_TRACE; ngừng ghi khi chạm TRACE_MAX_BYTES."""
+
+    def __init__(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(path, os.O_CREAT | os.O_WRONLY | os.O_APPEND | os.O_EXCL, 0o600)
+        self._file = os.fdopen(fd, "a", encoding="utf-8")
+        self._size = 0
+        self.path = path
+
+    def write(self, event: Any) -> None:
+        if self._file.closed:
+            return
+        line = json.dumps(
+            {"t": int(time.time() * 1000), "event": event},
+            ensure_ascii=False,
+            default=str,
+        )
+        if self._size + len(line) + 1 > TRACE_MAX_BYTES:
+            self._file.close()
+            return
+        self._file.write(line + "\n")
+        self._file.flush()
+        self._size += len(line) + 1
+
+
+def open_trace(account: str) -> EventTrace | None:
+    if account not in TRACE_ACCOUNTS:
+        return None
+    stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+    try:
+        trace = EventTrace(TRACE_DIR / f"{account}-{stamp}.jsonl")
+    except OSError as error:
+        log("trace", f"không mở được tệp trace: {error}")
+        return None
+    log("trace", f"ghi sự kiện thô vào {trace.path}")
+    return trace
+
+
 def install_labeled_log() -> None:
     """Cho SimpleBot dùng log có nhãn: hàm của nó tra ``log`` trong main lúc gọi."""
     upstream_main.log = log
@@ -189,6 +239,7 @@ class AccountBot(SimpleBot):
         self.listener.e2ee_memory_only = not E2EE_PERSIST
         self._loop: asyncio.AbstractEventLoop | None = None
         self._reconnecting = False
+        self._trace = open_trace(account)
 
     async def run(self) -> None:
         self._loop = asyncio.get_running_loop()
@@ -232,6 +283,8 @@ class AccountBot(SimpleBot):
     def _forward_listener_event(
         self, loop: asyncio.AbstractEventLoop, event: dict[str, Any]
     ) -> None:
+        if self._trace is not None:
+            self._trace.write(event)
         self._record_lifecycle(event)
         # SimpleBot chỉ chuyển tin nhắn/điều khiển; reaction, sửa, thu hồi thì
         # chuyển thẳng cho gateway (chạy trên event loop, gọi từ listener thread).
