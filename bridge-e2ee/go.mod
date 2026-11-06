@@ -15,7 +15,7 @@ require (
 
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect
-	github.com/andybalholm/brotli v1.2.4 // indirect
+	github.com/andybalholm/brotli v1.2.7 // indirect
 	github.com/beeper/argo-go v1.1.2 // indirect
 	github.com/beeper/poly1305 v0.0.0-20250815183548-d4eede7bbf3c // indirect
 	github.com/coder/websocket v1.8.15 // indirect
@@ -25,7 +25,7 @@ require (
 	github.com/gtank/ristretto255 v0.2.0 // indirect
 	github.com/icholy/digest v1.2.0 // indirect
 	github.com/imroc/req/v3 v3.56.0 // indirect
-	github.com/klauspost/compress v1.20.0 // indirect
+	github.com/klauspost/compress v1.20.2 // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/petermattis/goid v0.0.0-20260820044319-269ab09b5261 // indirect
