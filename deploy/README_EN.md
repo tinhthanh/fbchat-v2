@@ -89,7 +89,7 @@ With `GATEWAY_URL` and `GATEWAY_TOKEN` (at least 32 characters) set, `multi_main
 - Sender names come from `_get_user_info` and are cached.
 - Attachments (image, video, audio, file): the bot downloads them through `downloadE2EEMedia` (encrypted chats) or `downloadMedia` (regular chats) and sends them to the gateway as base64; agent files go out through `sendE2EEImage`/`sendE2EEVideo`/`sendE2EEAudio`/`sendE2EEDocument` or `sendImage`/`sendFile`. Stickers are downloaded as images (Messenger catalog stickers in encrypted chats: the bridge resolves their URL from the `receiverFetchID`); links and locations become a one-line description; a failed download becomes `[Sticker]`. Per-file limit `GATEWAY_MAX_FILE_MB` (default 20).
 - E2EE kinds the bridge cannot read yet (contact cards, polls, view-once, live location...) arrive as empty messages: the bot sends the line `❓ Loại tin chưa hỗ trợ: xem trên Messenger` instead of dropping them. Empty regular messages are still skipped.
-- Undecryptable E2EE messages: the bridge only emits a generic error, but the whatsmeow `raw` event (`UndecryptableMessage`) carries the chat, sender and message ID. The bot sends `⚠️ Tin nhắn mã hóa không giải mã được: xem trên Messenger` into the right conversation (own ID `undecryptable-<id>`, so the real message still gets through if it is decrypted later). Own messages and `DecryptFailMode=hide` are skipped.
+- Undecryptable E2EE messages: the whatsmeow `raw` event (`UndecryptableMessage`) carries the chat, sender and message ID; the reason is in the `error` event code 2 (see "Undecryptable E2EE messages" below). The bot sends `⚠️ Tin nhắn mã hóa không giải mã được: xem trên Messenger` into the right conversation (own ID `undecryptable-<id>`, so the real message still gets through if it is decrypted later). Own messages and `DecryptFailMode=hide` are skipped.
 - Regular (non-E2EE) messages sent while the bot was down: the bridge drops messages older than the connect time, and the sync on connect does not resend missed messages either (Messenger loads them only when a thread is opened), so they are not recovered yet. New Facebook chats are E2EE, which the bridge resyncs itself.
 - A reply the bridge does not confirm (deliveryStatus UNKNOWN) still returns 200 so the gateway does not resend it and the customer does not get duplicates.
 
@@ -137,6 +137,18 @@ Browser sign-in uses the `fb-login-ui` service (`login/` image, `control.py` com
 ### E2EE device state
 
 `AccountBot` stores the E2EE device state in `/data/accounts/<name>/e2ee_device.json` (mode `0600`). Upstream keeps it in memory by default (`e2ee_memory_only=True`): every restart becomes a new E2EE device and incoming messages often fail with `E2EE message could not be decrypted or was unavailable`. Set `FBCHAT_E2EE_PERSIST=0` to restore the upstream behaviour. The file holds the account's encryption keys: do not copy it out of the volume.
+
+#### Undecryptable E2EE messages
+
+For every message that fails to decrypt (`error` event code 2, except `reason=unavailable`):
+
+- It is recorded in the account history (Channel accounts page) with `kind: "decrypt"`: group or 1-1 chat, a sender device tag (first 8 hex characters of the SHA-256 of the JID, no raw ID) and the reason. Consecutive failures from the same device are merged into one entry.
+- When one sender device has 3 distinct messages fail within 24 hours, the bot alerts once through the gateway's `POST /v1/alert` (Telegram, per the Alerts page). The bridge retries each message a few times with the same ID, so the count is per message ID.
+
+`bad_mac` (mismatching MAC) means the Signal session between the bot's device and one of the sender's devices is out of sync. It does not heal by itself: the bridge asks for a resend, but Messenger keeps encrypting with the old session. To fix it:
+
+1. The sender logs out and back in to Messenger on that device (a new device means a new session).
+2. If the device is unknown or several senders fail: stop the account, rename `e2ee_device.json` and start it again so the bot becomes a new E2EE device (Facebook sees one more device; messages that already failed are not recovered).
 
 Payload debugging: `FBBOT_TRACE=acc2,shop2` (comma-separated account names) writes every raw listener event, including types the bot ignores (such as call signals), to `/data/trace/<name>-<UTC time>.jsonl` (mode `0600`, at most 20 MiB per file). The file holds message content: enable it only for test accounts, then delete the file and unset the variable.
 

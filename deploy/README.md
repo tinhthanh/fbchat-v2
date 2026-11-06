@@ -89,7 +89,7 @@ Khi đặt `GATEWAY_URL` và `GATEWAY_TOKEN` (ít nhất 32 ký tự), `multi_ma
 - Tên người gửi lấy bằng `_get_user_info` và được cache.
 - File đính kèm (ảnh, video, audio, file): bot tải qua `downloadE2EEMedia` (chat mã hóa) hoặc `downloadMedia` (chat thường) rồi gửi kèm base64 cho gateway; file nhân viên gửi đi bằng `sendE2EEImage`/`sendE2EEVideo`/`sendE2EEAudio`/`sendE2EEDocument` hoặc `sendImage`/`sendFile`. Sticker tải về như ảnh (sticker kho của Messenger trong chat mã hóa: bridge lấy URL qua `receiverFetchID`); link, vị trí thành dòng mô tả; tải lỗi thì thành `[Sticker]`. Giới hạn mỗi tệp `GATEWAY_MAX_FILE_MB` (mặc định 20).
 - Loại tin E2EE bridge chưa đọc được (danh thiếp, bình chọn, xem một lần, vị trí trực tiếp...) đến dưới dạng tin rỗng: bot gửi dòng `❓ Loại tin chưa hỗ trợ: xem trên Messenger` thay vì bỏ qua. Tin thường rỗng vẫn bỏ qua.
-- Tin E2EE không giải mã được: bridge chỉ phát lỗi chung, nhưng sự kiện `raw` của whatsmeow (`UndecryptableMessage`) có chat, người gửi và ID tin. Bot gửi tin `⚠️ Tin nhắn mã hóa không giải mã được: xem trên Messenger` vào đúng hội thoại (ID riêng `undecryptable-<id>`, nên nếu sau đó giải mã lại được thì tin thật vẫn vào). Bỏ qua tin của chính mình và loại `DecryptFailMode=hide`.
+- Tin E2EE không giải mã được: sự kiện `raw` của whatsmeow (`UndecryptableMessage`) có chat, người gửi và ID tin; lý do nằm ở sự kiện `error` code 2 (xem "Tin E2EE không giải mã được" bên dưới). Bot gửi tin `⚠️ Tin nhắn mã hóa không giải mã được: xem trên Messenger` vào đúng hội thoại (ID riêng `undecryptable-<id>`, nên nếu sau đó giải mã lại được thì tin thật vẫn vào). Bỏ qua tin của chính mình và loại `DecryptFailMode=hide`.
 - Tin chat thường (không E2EE) gửi lúc bot không chạy: bridge bỏ tin cũ hơn lúc kết nối, và đợt đồng bộ khi kết nối cũng không gửi lại tin bị lỡ (Messenger chỉ tải khi mở hội thoại), nên chưa lấy lại được. Chat Facebook mới đều là E2EE, bridge tự đồng bộ lại.
 - Tin trả lời không có xác nhận từ bridge (deliveryStatus UNKNOWN) vẫn trả 200 để gateway không gửi lại, tránh khách nhận trùng.
 
@@ -137,6 +137,18 @@ Tên/ảnh của chính tài khoản lấy từ `/chat/user_info`; một số t�
 ### Trạng thái thiết bị E2EE
 
 `AccountBot` lưu trạng thái thiết bị E2EE vào `/data/accounts/<tên>/e2ee_device.json` (quyền `0600`). Upstream mặc định giữ trạng thái này trong RAM (`e2ee_memory_only=True`): mỗi lần restart là một thiết bị E2EE mới và tin đến thường báo `E2EE message could not be decrypted or was unavailable`. Đặt `FBCHAT_E2EE_PERSIST=0` để quay lại hành vi upstream. File này là khóa mã hóa của tài khoản: không copy ra ngoài volume.
+
+#### Tin E2EE không giải mã được
+
+Mỗi tin không giải mã được (sự kiện `error` code 2, trừ `reason=unavailable`):
+
+- Ghi vào lịch sử tài khoản (trang Tài khoản kênh) với `kind: "decrypt"`: nhóm hay chat 1-1, mã thiết bị gửi (8 ký tự đầu SHA-256 của JID, không lộ ID) và lý do. Các lần liền nhau từ cùng thiết bị gộp một mục.
+- Cùng một thiết bị gửi có 3 tin khác nhau lỗi trong 24 giờ thì báo một lần qua `POST /v1/alert` của gateway (Telegram theo trang Cảnh báo). Bridge thử lại mỗi tin vài lần với cùng ID nên đếm theo ID tin.
+
+`bad_mac` (MAC không khớp) nghĩa là phiên Signal giữa thiết bị của bot và một thiết bị của người gửi đã lệch. Lỗi này không tự hết: bridge xin gửi lại nhưng Messenger vẫn mã hoá bằng phiên cũ. Cách sửa:
+
+1. Người gửi đăng xuất rồi đăng nhập lại Messenger trên thiết bị đó (thiết bị mới thì phiên mới).
+2. Nếu không biết thiết bị nào hoặc nhiều người cùng lỗi: dừng tài khoản, đổi tên `e2ee_device.json` rồi chạy lại để bot thành thiết bị E2EE mới (Facebook thấy thêm một thiết bị; tin đã lỗi không lấy lại được).
 
 Debug payload: `FBBOT_TRACE=acc2,shop2` (tên tài khoản, cách nhau bởi dấu phẩy) ghi mọi sự kiện thô của listener, kể cả loại bot đang bỏ qua (vd. tín hiệu cuộc gọi), vào `/data/trace/<tên>-<giờ UTC>.jsonl` (quyền `0600`, tối đa 20 MiB mỗi tệp). Tệp có nội dung tin nhắn: chỉ bật cho tài khoản thử, xoá tệp và tắt biến khi xong.
 

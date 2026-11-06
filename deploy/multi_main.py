@@ -44,8 +44,11 @@ from connection_history import (
     HISTORY_FILE,
     SESSION_CAUSES,
     ConnectionHistory,
+    DecryptFailureWatch,
     classify_bridge_error,
     classify_raw_event,
+    decrypt_failure,
+    decrypt_history_message,
     describe_run_error,
     diagnose_session,
 )
@@ -240,6 +243,7 @@ class AccountBot(SimpleBot):
         self._loop: asyncio.AbstractEventLoop | None = None
         self._reconnecting = False
         self._trace = open_trace(account)
+        self._decrypt_watch = DecryptFailureWatch()
 
     async def run(self) -> None:
         self._loop = asyncio.get_running_loop()
@@ -360,6 +364,16 @@ class AccountBot(SimpleBot):
             label = classify_bridge_error(event.get("data"))
             if label:
                 history.record("platform", label)
+            failure = decrypt_failure(event.get("data"))
+            if failure is not None:
+                history.record("decrypt", decrypt_history_message(failure))
+                count = self._decrypt_watch.observe(failure)
+                if count and _gateway is not None and self._loop is not None:
+                    with contextlib.suppress(RuntimeError):  # loop đã đóng khi đang tắt
+                        asyncio.run_coroutine_threadsafe(
+                            send_decrypt_alert(self.account, failure, count),
+                            self._loop,
+                        )
         elif kind == "raw":
             label = classify_raw_event(event)
             if label:
@@ -370,6 +384,24 @@ class AccountBot(SimpleBot):
         # thread, nên phải gắn lại nhãn; không ảnh hưởng task khác.
         LOG_LABEL.set(self.account)
         super()._queue_event(event)
+
+
+async def send_decrypt_alert(account: str, failure: dict[str, Any], count: int) -> None:
+    """Báo Telegram (qua gateway) khi một thiết bị gửi liên tục không giải mã được."""
+    if _gateway is None:
+        return
+    where = "trong nhóm" if failure["group"] else "trong chat 1-1"
+    text = (
+        f"🟠 Facebook - {account}: {count} tin E2EE {where} từ thiết bị "
+        f"{failure['device']} không giải mã được ({failure['label']}). Tin vào "
+        "Libredesk thành dòng ⚠️, phải xem trên Messenger. Lỗi này thường không "
+        "tự hết: nhờ người gửi đăng xuất rồi đăng nhập lại Messenger trên thiết "
+        "bị đó (xem deploy/README.md, mục tin E2EE không giải mã được)."
+    )
+    try:
+        await _gateway.post_alert(text)
+    except httpx.HTTPError as error:
+        log("gateway", f"Gửi cảnh báo giải mã thất bại: {type(error).__name__}")
 
 
 def set_account_state(name: str, state: str | None) -> None:

@@ -10,9 +10,13 @@ import pytest
 
 from connection_history import (
     ConnectionHistory,
+    DecryptFailureWatch,
     classify_bridge_error,
     classify_raw_event,
+    decrypt_failure,
+    decrypt_history_message,
     describe_run_error,
+    device_tag,
     diagnose_session,
 )
 
@@ -108,3 +112,58 @@ def test_history_file_is_json_list(tmp_path: Path) -> None:
     history.record("session_expired", "Facebook đã huỷ phiên")
     data = json.loads((tmp_path / "history.json").read_text(encoding="utf-8"))
     assert data[0]["kind"] == "session_expired" and data[0]["at"].endswith("Z")
+
+
+def _decrypt_error(**extra: object) -> dict[str, object]:
+    return {
+        "message": "E2EE message could not be decrypted or was unavailable",
+        "code": 2,
+        "reason": "bad_mac",
+        "messageId": "M1",
+        "senderJid": "100012.0:3@msgr",
+        "isGroup": True,
+        **extra,
+    }
+
+
+def test_decrypt_failure_labels_reason_without_raw_ids() -> None:
+    failure = decrypt_failure(_decrypt_error())
+    assert failure is not None
+    assert failure["reason"] == "bad_mac"
+    assert failure["device"] == device_tag("100012.0:3@msgr")
+    message = decrypt_history_message(failure)
+    assert "MAC không khớp" in message and "nhóm" in message
+    assert failure["device"] in message and "100012" not in message
+
+    # Bridge cũ không gửi reason: vẫn ghi, nhãn "không rõ".
+    old = decrypt_failure({"message": "x", "code": 2})
+    assert old is not None and old["label"] == "không rõ lý do" and old["device"] == ""
+    # Thiết bị gửi cố ý không gửi bản mã cho bot, và lỗi khác code 2: bỏ qua.
+    assert decrypt_failure(_decrypt_error(reason="unavailable")) is None
+    assert decrypt_failure({"message": "x", "code": 1}) is None
+    assert decrypt_failure(None) is None
+
+
+def test_decrypt_watch_alerts_once_per_device_after_distinct_messages() -> None:
+    now = [0.0]
+    watch = DecryptFailureWatch(threshold=3, window=100, clock=lambda: now[0])
+
+    def observe(message_id: str, sender: str = "a@msgr") -> int:
+        failure = decrypt_failure(
+            _decrypt_error(messageId=message_id, senderJid=sender)
+        )
+        assert failure is not None
+        return watch.observe(failure)
+
+    # Bridge thử lại một tin vài lần với cùng ID: chỉ tính một.
+    assert [observe("M1") for _ in range(5)] == [0] * 5
+    assert observe("M2") == 0
+    assert observe("X1", sender="b@msgr") == 0  # thiết bị khác đếm riêng
+    assert observe("M3") == 3
+    assert observe("M4") == 0  # đã báo trong cửa sổ
+    now[0] = 250.0  # hết cửa sổ: các tin cũ không còn tính
+    assert observe("M5") == 0 and observe("M6") == 0
+    assert observe("M7") == 3
+
+    # Thiếu thiết bị hoặc ID tin (bridge cũ): không đếm được, không báo.
+    assert watch.observe({"device": "", "message_id": "M9"}) == 0

@@ -471,6 +471,10 @@ class GatewayLink:
             # Gateway tự tạo inbox ở tin nhắn đầu tiên nên không chặn bot.
             self.log("gateway", f"Đăng ký inbox thất bại: {error}")
 
+    async def post_alert(self, text: str) -> None:
+        """Cảnh báo Telegram theo cài đặt trang Cảnh báo (204 khi đang tắt)."""
+        await self._post("/v1/alert", {"text": text})
+
     def unregister(self, account: str, bot: _Bot) -> None:
         if self.bots.get(account) is bot:
             del self.bots[account]

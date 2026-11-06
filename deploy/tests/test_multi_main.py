@@ -577,3 +577,44 @@ def test_event_trace_stops_at_size_cap(
     for _ in range(5):
         trace.write({"type": "message", "data": "x" * 30})
     assert len(trace.path.read_text(encoding="utf-8").splitlines()) == 1
+
+
+@pytest.mark.asyncio
+async def test_decrypt_failures_recorded_and_alerted_once(
+    monkeypatch: pytest.MonkeyPatch,
+    mock_dataFB: dict[str, Any],
+    fake_listener: _FakeListener,
+) -> None:
+    monkeypatch.setattr(multi_main, "_account_history", {})
+    alerts: list[str] = []
+
+    class _Gateway:
+        async def post_alert(self, text: str) -> None:
+            alerts.append(text)
+
+    monkeypatch.setattr(multi_main, "_gateway", _Gateway())
+    bot = multi_main.AccountBot(mock_dataFB, account="acc1", device_path="/d.json")
+    bot._loop = asyncio.get_running_loop()
+
+    def error(message_id: str) -> dict[str, Any]:
+        return {
+            "type": "error",
+            "data": {
+                "message": "E2EE message could not be decrypted or was unavailable",
+                "code": 2,
+                "reason": "bad_mac",
+                "messageId": message_id,
+                "senderJid": "100012.0:3@msgr",
+                "isGroup": True,
+            },
+        }
+
+    for message_id in ["M1", "M1", "M2", "M3", "M4"]:
+        await asyncio.to_thread(bot._record_lifecycle, error(message_id))
+    await asyncio.sleep(0.05)
+
+    items = multi_main.account_history("acc1").items
+    assert [i["kind"] for i in items] == ["decrypt"]  # cùng thiết bị: gộp một mục
+    assert items[0]["count"] == 5 and "MAC không khớp" in items[0]["message"]
+    assert len(alerts) == 1
+    assert "3 tin E2EE trong nhóm" in alerts[0] and "100012" not in alerts[0]

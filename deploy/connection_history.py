@@ -8,10 +8,12 @@ nhãn nguyên nhân do bot tự phân loại, không ghi chữ lỗi thô của 
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import tempfile
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -24,7 +26,7 @@ from _core._session import _build_home_request
 HISTORY_FILE = "history.json"
 HISTORY_MAX = 30
 
-# kind: connected | network | disconnected | platform | session_expired
+# kind: connected | network | disconnected | platform | session_expired | decrypt
 SESSION_CAUSES = {
     "revoked": (
         "Facebook đã huỷ phiên (xoá cookie c_user/xs): đăng xuất từ xa, đổi mật khẩu "
@@ -65,6 +67,25 @@ _AUTH_HINTS = (
     "login",
     "checkpoint",
 )
+
+
+# Lý do bridge gửi kèm event "error" code 2 (bridge-e2ee/bridge/decrypt_failures.go).
+DECRYPT_REASONS = {
+    "bad_mac": "MAC không khớp, phiên mã hoá với thiết bị gửi đã lệch",
+    "no_session": "chưa có phiên mã hoá với thiết bị gửi",
+    "no_sender_key": "thiếu khoá nhóm của thiết bị gửi",
+    "untrusted_identity": "khoá danh tính của thiết bị gửi đã đổi",
+    "prekey": "lỗi khoá dùng một lần (prekey)",
+    "too_far_in_future": "tin vượt quá xa bộ đếm của phiên",
+    "invalid_message": "tin hỏng hoặc sai phiên bản",
+    "other": "lỗi giải mã khác",
+    "unknown": "không rõ lý do",
+}
+# Thiết bị gửi chủ động không gửi bản mã cho bot (loại tin cố ý ẩn): không phải lỗi.
+_DECRYPT_IGNORED = {"unavailable"}
+DECRYPT_ALERT_AFTER = 3  # số tin khác nhau từ cùng một thiết bị
+DECRYPT_ALERT_WINDOW = 24 * 3600.0
+_DECRYPT_MAX_DEVICES = 256
 
 
 def _now() -> str:
@@ -204,3 +225,81 @@ def describe_run_error(error: BaseException) -> tuple[str, str]:
     if name in {"ConnectError", "ConnectTimeout", "ReadTimeout", "RemoteProtocolError"}:
         return "network", f"Lỗi mạng khi gọi Facebook ({name})."
     return "disconnected", f"Bot dừng do lỗi {name}."
+
+
+def device_tag(jid: str) -> str:
+    """Mã ngắn cố định cho một thiết bị gửi: so được giữa các lần, không lộ ID."""
+    return hashlib.sha256(jid.encode("utf-8")).hexdigest()[:8]
+
+
+def decrypt_failure(data: Any) -> dict[str, Any] | None:
+    """Thông tin của event "error" code 2 cần ghi; None nếu không phải lỗi giải mã."""
+    if not isinstance(data, dict) or data.get("code") != 2:
+        return None
+    reason = str(data.get("reason") or "unknown")
+    if reason in _DECRYPT_IGNORED:
+        return None
+    sender = data.get("senderJid")
+    return {
+        "reason": reason,
+        "label": DECRYPT_REASONS.get(reason, DECRYPT_REASONS["unknown"]),
+        "device": device_tag(sender) if isinstance(sender, str) and sender else "",
+        "message_id": str(data.get("messageId") or ""),
+        "group": bool(data.get("isGroup")),
+        "from_me": bool(data.get("isFromMe")),
+    }
+
+
+def decrypt_history_message(failure: dict[str, Any]) -> str:
+    where = "nhóm" if failure["group"] else "chat 1-1"
+    device = f", thiết bị {failure['device']}" if failure["device"] else ""
+    own = " của chính tài khoản" if failure["from_me"] else ""
+    return f"Tin E2EE không giải mã được ({where}{device}{own}): {failure['label']}"
+
+
+class DecryptFailureWatch:
+    """Đếm tin không giải mã được theo thiết bị gửi để báo một lần khi lỗi lặp lại.
+
+    Một thiết bị lỗi liên tục (phiên Signal lệch) không tự khỏi; bridge thử lại
+    mỗi tin vài lần với cùng ID nên đếm theo ID tin, không theo event.
+    """
+
+    def __init__(
+        self,
+        *,
+        threshold: int = DECRYPT_ALERT_AFTER,
+        window: float = DECRYPT_ALERT_WINDOW,
+        clock: Any = time.monotonic,
+    ) -> None:
+        self.threshold = threshold
+        self.window = window
+        self.clock = clock
+        self._lock = threading.Lock()
+        self._seen: dict[str, dict[str, float]] = {}  # thiết bị -> {ID tin: lúc}
+        self._alerted: dict[str, float] = {}
+
+    def observe(self, failure: dict[str, Any]) -> int:
+        """Trả về số tin lỗi khi vừa chạm ngưỡng (cần báo), ngược lại 0."""
+        device, message_id = failure.get("device"), failure.get("message_id")
+        if not device or not message_id:
+            return 0
+        now = self.clock()
+        with self._lock:
+            seen = self._seen.setdefault(device, {})
+            seen[message_id] = now
+            for key, at in list(seen.items()):
+                if now - at > self.window:
+                    del seen[key]
+            if len(self._seen) > _DECRYPT_MAX_DEVICES:
+                oldest = min(
+                    self._seen, key=lambda d: max(self._seen[d].values(), default=0)
+                )
+                self._seen.pop(oldest, None)
+                self._alerted.pop(oldest, None)
+            alerted_at = self._alerted.get(device)
+            if alerted_at is not None and now - alerted_at <= self.window:
+                return 0
+            if len(seen) < self.threshold:
+                return 0
+            self._alerted[device] = now
+            return len(seen)
