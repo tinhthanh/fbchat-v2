@@ -81,6 +81,7 @@ type Client struct {
 	regularFailure       transportFailureState
 	e2eeFailure          transportFailureState
 	regularConnected     atomic.Bool
+	decryptFailures      *decryptFailures
 }
 
 // ClientConfig for creating a new client
@@ -141,6 +142,7 @@ func NewClient(cfg *ClientConfig) (*Client, error) {
 	zerolog.SetGlobalLevel(logLevel)
 	console := zerolog.ConsoleWriter{Out: os.Stderr}
 	logger := zerolog.New(newRedactingLogWriter(console)).With().Timestamp().Logger()
+	installSignalLog(logger)
 
 	// Create messagix client
 	msgClient := messagix.NewClient(cks, logger, &messagix.Config{
@@ -185,6 +187,7 @@ func NewClient(cfg *ClientConfig) (*Client, error) {
 		recentUnreactions:  make(map[string]int64),
 		recentMessages:     make(map[string]recentMessageEvent),
 		recentE2EEMessages: make(map[string]int64),
+		decryptFailures:    newDecryptFailures(),
 	}
 
 	// Set callback for device data changes (only when using deviceData mode)
@@ -333,6 +336,9 @@ func (c *Client) connectE2EE(operations e2eeConnectOperations) (err error) {
 	}
 	if e2eeClient == nil {
 		return errors.New("prepared E2EE client is nil")
+	}
+	if c.decryptFailures != nil {
+		e2eeClient.Log = newDecryptFailureLog(e2eeClient.Log, c.decryptFailures)
 	}
 	var eventHandlerID uint32
 	eventHandlerRegistered := false

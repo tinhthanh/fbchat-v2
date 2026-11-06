@@ -14,6 +14,10 @@ phiên bản tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 - Bridge RPC `getCookies` trả cookie hiện tại của phiên (messagix cập nhật từ
   Set-Cookie); Python `listeningE2EEEvent.get_cookies()` /
   `get_cookies_blocking()` (bridge cũ không có method thì trả `{}`).
+- Sự kiện `error` code 2 (tin E2EE không giải mã được) có thêm `reason`
+  (`bad_mac`, `no_session`, `no_sender_key`...), `messageId`, `chatJid`,
+  `senderJid`, `isGroup`, `isFromMe`. Bridge bắt lỗi từ log của whatsmeow nên có
+  lý do cả khi `logLevel` là `none`.
 - Deploy (fb-bot của fork): xem [deploy/README.md](deploy/README.md).
 
 > Các thay đổi website dưới đây hiện chỉ nằm trong working copy `website/` đang
@@ -53,6 +57,10 @@ phiên bản tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
   thống nhất.
 
 ### Fixed
+
+- Bridge E2EE: log của libsignal (vd. `mismatching MAC in signal message`) không
+  còn in ra stdout, kênh JSON-RPC với Python (Python ghi `bad json` và có thể
+  chen vào giữa phản hồi RPC); giờ đi qua logger stderr của bridge.
 
 - Bridge: cảm xúc E2EE (`sendE2EEReaction`) nay có `senderTimestampMs` như
   mautrix-meta. Thiếu trường này thì app Messenger không hiện cảm xúc, dù

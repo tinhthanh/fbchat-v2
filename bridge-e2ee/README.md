@@ -334,7 +334,23 @@ Sự kiện `error` theo `code`:
 | `1` | Kết nối Messenger lỗi vĩnh viễn |
 | `2` | Tin E2EE không giải mã được |
 
+Sự kiện code `2` có thêm `reason`, `messageId`, `chatJid`, `senderJid`, `isGroup`, `isFromMe`. `reason` lấy từ lỗi whatsmeow ghi ngay trước sự kiện `UndecryptableMessage` (`bridge/decrypt_failures.go`), kể cả khi `logLevel` là `none`:
+
+| `reason` | Ý nghĩa |
+|---|---|
+| `bad_mac` | MAC không khớp: phiên Signal với thiết bị gửi đã lệch, không tự hết |
+| `no_session` | Chưa có phiên Signal với thiết bị gửi |
+| `no_sender_key` | Thiếu khoá nhóm (sender key) của thiết bị gửi |
+| `untrusted_identity` | Khoá danh tính của thiết bị gửi đã đổi |
+| `prekey` | Lỗi prekey trong tin mở phiên |
+| `too_far_in_future` | Tin vượt quá xa bộ đếm của phiên |
+| `invalid_message` | Tin hỏng hoặc sai phiên bản |
+| `unavailable` | Thiết bị gửi không gửi bản mã cho bridge (loại tin cố ý ẩn) |
+| `other`, `unknown` | Lỗi khác, hoặc không bắt được lỗi (whatsmeow đổi chuỗi log: có test ghim) |
+
 Python `bridge_error_label()` (trong `_listening_e2ee`) đặt nhãn log theo code này mà không in payload: `socket disconnected, reconnecting`, `undecryptable e2ee message` hoặc `bridge error (code N)`.
+
+Log của libsignal đi qua logger của bridge (stderr, đã che secret, theo `logLevel`). Logger mặc định của libsignal in ra stdout, tức kênh JSON-RPC, nên Python từng thấy dòng `bad json`.
 
 Message event:
 

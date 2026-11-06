@@ -177,6 +177,13 @@ type TypingEvent struct {
 type ErrorEvent struct {
 	Message string `json:"message"`
 	Code    int    `json:"code,omitempty"`
+	// Only for code 2 (undecryptable E2EE message).
+	Reason    string `json:"reason,omitempty"`
+	MessageID string `json:"messageId,omitempty"`
+	ChatJID   string `json:"chatJid,omitempty"`
+	SenderJID string `json:"senderJid,omitempty"`
+	IsGroup   bool   `json:"isGroup,omitempty"`
+	IsFromMe  bool   `json:"isFromMe,omitempty"`
 }
 
 // RawEventSource represents the source of a raw event
@@ -1011,10 +1018,7 @@ func (c *Client) handleE2EEEvent(evt interface{}) {
 		})
 
 	case *events.UndecryptableMessage:
-		c.emitEvent(EventTypeError, &ErrorEvent{
-			Message: "E2EE message could not be decrypted or was unavailable",
-			Code:    2,
-		})
+		c.emitEvent(EventTypeError, c.undecryptableErrorEvent(e))
 	}
 }
 
@@ -1807,4 +1811,28 @@ func extractURLFromLPHP(addr string) string {
 		}
 	}
 	return addr
+}
+
+func (c *Client) undecryptableErrorEvent(e *events.UndecryptableMessage) *ErrorEvent {
+	reason := ""
+	if c.decryptFailures != nil {
+		reason = c.decryptFailures.take(e.Info.ID)
+	}
+	if reason == "" {
+		if e.IsUnavailable {
+			reason = DecryptReasonUnavailable
+		} else {
+			reason = DecryptReasonUnknown
+		}
+	}
+	return &ErrorEvent{
+		Message:   "E2EE message could not be decrypted or was unavailable",
+		Code:      2,
+		Reason:    reason,
+		MessageID: e.Info.ID,
+		ChatJID:   e.Info.Chat.String(),
+		SenderJID: e.Info.Sender.String(),
+		IsGroup:   e.Info.IsGroup,
+		IsFromMe:  e.Info.IsFromMe,
+	}
 }

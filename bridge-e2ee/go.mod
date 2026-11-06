@@ -5,6 +5,7 @@ go 1.26.10
 require (
 	github.com/google/uuid v1.6.0
 	github.com/rs/zerolog v1.35.1
+	go.mau.fi/libsignal v0.2.2
 	go.mau.fi/mautrix-meta v0.0.0
 	go.mau.fi/util v0.10.2-0.20260918225449-a4c0d5b86aa8
 	go.mau.fi/whatsmeow v0.0.0-20260919103545-0057a822e79a
@@ -38,7 +39,6 @@ require (
 	github.com/tidwall/sjson v1.2.5 // indirect
 	github.com/vektah/gqlparser/v2 v2.5.27 // indirect
 	github.com/yuin/goldmark v1.8.6 // indirect
-	go.mau.fi/libsignal v0.2.2 // indirect
 	go.mau.fi/zeroconfig v0.2.0 // indirect
 	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/exp v0.0.0-20260908205506-85c1c2202aba // indirect
