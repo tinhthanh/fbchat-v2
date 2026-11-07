@@ -340,6 +340,7 @@ Sự kiện code `2` có thêm `reason`, `messageId`, `chatJid`, `senderJid`, `i
 |---|---|
 | `bad_mac` | MAC không khớp: phiên Signal với thiết bị gửi đã lệch, không tự hết |
 | `no_session` | Chưa có phiên Signal với thiết bị gửi |
+| `no_valid_session` | Có phiên nhưng không trạng thái nào khớp với phiên thiết bị gửi đang dùng |
 | `no_sender_key` | Thiếu khoá nhóm (sender key) của thiết bị gửi |
 | `untrusted_identity` | Khoá danh tính của thiết bị gửi đã đổi |
 | `prekey` | Lỗi prekey trong tin mở phiên |

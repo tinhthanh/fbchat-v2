@@ -27,6 +27,7 @@ const maxPendingDecryptFailures = 256
 const (
 	DecryptReasonBadMAC            = "bad_mac"
 	DecryptReasonNoSession         = "no_session"
+	DecryptReasonNoValidSession    = "no_valid_session"
 	DecryptReasonNoSenderKey       = "no_sender_key"
 	DecryptReasonUntrustedIdentity = "untrusted_identity"
 	DecryptReasonPreKey            = "prekey"
@@ -41,10 +42,12 @@ func classifyDecryptError(err error) string {
 	switch {
 	case errors.Is(err, signalerror.ErrBadMAC):
 		return DecryptReasonBadMAC
-	case errors.Is(err, signalerror.ErrNoSessionForUser),
-		errors.Is(err, signalerror.ErrNoValidSessions),
-		errors.Is(err, signalerror.ErrUninitializedSession):
+	case errors.Is(err, signalerror.ErrNoSessionForUser):
 		return DecryptReasonNoSession
+	case errors.Is(err, signalerror.ErrNoValidSessions),
+		errors.Is(err, signalerror.ErrUninitializedSession):
+		// A session exists but none of its states matches the sender's.
+		return DecryptReasonNoValidSession
 	case errors.Is(err, signalerror.ErrNoSenderKeyForUser),
 		errors.Is(err, signalerror.ErrNoSenderKeyStatesInRecord),
 		errors.Is(err, signalerror.ErrNoSenderKeyStateForID):

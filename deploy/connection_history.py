@@ -73,6 +73,7 @@ _AUTH_HINTS = (
 DECRYPT_REASONS = {
     "bad_mac": "MAC không khớp, phiên mã hoá với thiết bị gửi đã lệch",
     "no_session": "chưa có phiên mã hoá với thiết bị gửi",
+    "no_valid_session": "có phiên nhưng không khớp phiên thiết bị gửi đang dùng",
     "no_sender_key": "thiếu khoá nhóm của thiết bị gửi",
     "untrusted_identity": "khoá danh tính của thiết bị gửi đã đổi",
     "prekey": "lỗi khoá dùng một lần (prekey)",

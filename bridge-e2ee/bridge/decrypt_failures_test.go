@@ -26,7 +26,8 @@ func TestClassifyDecryptErrorUnwrapsLibsignalErrors(t *testing.T) {
 	cases := map[error]string{
 		wrap(signalerror.ErrBadMAC):                DecryptReasonBadMAC,
 		wrap(signalerror.ErrNoSessionForUser):      DecryptReasonNoSession,
-		wrap(signalerror.ErrUninitializedSession):  DecryptReasonNoSession,
+		wrap(signalerror.ErrNoValidSessions):       DecryptReasonNoValidSession,
+		wrap(signalerror.ErrUninitializedSession):  DecryptReasonNoValidSession,
 		wrap(signalerror.ErrNoSenderKeyForUser):    DecryptReasonNoSenderKey,
 		wrap(signalerror.ErrNoSenderKeyStateForID): DecryptReasonNoSenderKey,
 		wrap(signalerror.ErrUntrustedIdentity):     DecryptReasonUntrustedIdentity,
