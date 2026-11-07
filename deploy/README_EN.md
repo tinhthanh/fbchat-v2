@@ -145,7 +145,9 @@ For every message that fails to decrypt (`error` event code 2, except `reason=un
 - It is recorded in the account history (Channel accounts page) with `kind: "decrypt"`: group or 1-1 chat, a sender device tag (first 8 hex characters of the SHA-256 of the JID, no raw ID), which ciphertext failed (session-opening, normal or group message) and the reason. If that device sent session-opening messages with `state=false` (the bridge does not store their session), the entry also gives how many. Consecutive failures from the same device are merged into one entry.
 - When one sender device has 3 distinct messages fail within 24 hours, the bot alerts once through the gateway's `POST /v1/alert` (Telegram, per the Alerts page). The bridge retries each message a few times with the same ID, so the count is per message ID.
 
-`bad_mac` (mismatching MAC) means the Signal session between the bot's device and one of the sender's devices is out of sync. It does not heal by itself: the bridge asks for a resend, but Messenger keeps encrypting with the old session. To fix it:
+Since 03/11/2026 newer Messenger apps send Signal messages with new protobuf fields; libsignal v0.2.2 checked the MAC over a re-serialized copy, so every message from those devices failed with `bad_mac`/`no_valid_session` (session-opening messages included). The bridge uses libsignal v0.2.3, which checks the original bytes. If this pattern returns for every sender on one device, check the libsignal version before recreating the device.
+
+`bad_mac` (mismatching MAC) can also mean the Signal session between the bot's device and one of the sender's devices is out of sync. It does not heal by itself: the bridge asks for a resend, but Messenger keeps encrypting with the old session. To fix it:
 
 1. The sender logs out and back in to Messenger on that device (a new device means a new session).
 2. If the device is unknown or several senders fail: stop the account, rename `e2ee_device.json` and start it again so the bot becomes a new E2EE device (Facebook sees one more device; messages that already failed are not recovered).

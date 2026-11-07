@@ -62,6 +62,10 @@ phiên bản tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
 ### Fixed
 
+- Bridge E2EE: nâng libsignal lên v0.2.3. Bản v0.2.2 kiểm tra MAC trên tin Signal
+  serialize lại thay vì byte nhận được, nên tin từ app Messenger mới (có trường
+  protobuf mới) luôn sai MAC: `bad_mac` hoặc `no_valid_session`, kể cả tin mở
+  phiên, và không tự hết. Từ 03/11/2026 một số người gửi không đọc được.
 - Bridge E2EE: log của libsignal (vd. `mismatching MAC in signal message`) không
   còn in ra stdout, kênh JSON-RPC với Python (Python ghi `bad json` và có thể
   chen vào giữa phản hồi RPC); giờ đi qua logger stderr của bridge.

@@ -145,7 +145,9 @@ Mỗi tin không giải mã được (sự kiện `error` code 2, trừ `reason=
 - Ghi vào lịch sử tài khoản (trang Tài khoản kênh) với `kind: "decrypt"`: nhóm hay chat 1-1, mã thiết bị gửi (8 ký tự đầu SHA-256 của JID, không lộ ID), loại bản mã lỗi (tin mở phiên, tin thường, tin nhóm) và lý do. Nếu thiết bị đó từng gửi tin mở phiên `state=false` (bridge không lưu phiên) thì mục ghi thêm số tin này. Các lần liền nhau từ cùng thiết bị gộp một mục.
 - Cùng một thiết bị gửi có 3 tin khác nhau lỗi trong 24 giờ thì báo một lần qua `POST /v1/alert` của gateway (Telegram theo trang Cảnh báo). Bridge thử lại mỗi tin vài lần với cùng ID nên đếm theo ID tin.
 
-`bad_mac` (MAC không khớp) nghĩa là phiên Signal giữa thiết bị của bot và một thiết bị của người gửi đã lệch. Lỗi này không tự hết: bridge xin gửi lại nhưng Messenger vẫn mã hoá bằng phiên cũ. Cách sửa:
+Từ 03/11/2026 app Messenger mới gửi tin Signal có trường protobuf mới; libsignal v0.2.2 kiểm tra MAC trên bản serialize lại nên mọi tin từ các máy này lỗi `bad_mac`/`no_valid_session` (cả tin mở phiên). Bridge dùng libsignal v0.2.3 (kiểm tra trên byte gốc). Gặp lại kiểu lỗi này với mọi người gửi của một máy thì kiểm tra phiên bản libsignal trước khi đổi thiết bị.
+
+`bad_mac` (MAC không khớp) cũng có thể nghĩa là phiên Signal giữa thiết bị của bot và một thiết bị của người gửi đã lệch. Lỗi này không tự hết: bridge xin gửi lại nhưng Messenger vẫn mã hoá bằng phiên cũ. Cách sửa:
 
 1. Người gửi đăng xuất rồi đăng nhập lại Messenger trên thiết bị đó (thiết bị mới thì phiên mới).
 2. Nếu không biết thiết bị nào hoặc nhiều người cùng lỗi: dừng tài khoản, đổi tên `e2ee_device.json` rồi chạy lại để bot thành thiết bị E2EE mới (Facebook thấy thêm một thiết bị; tin đã lỗi không lấy lại được).
