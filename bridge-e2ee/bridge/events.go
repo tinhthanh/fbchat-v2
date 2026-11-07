@@ -184,6 +184,9 @@ type ErrorEvent struct {
 	SenderJID string `json:"senderJid,omitempty"`
 	IsGroup   bool   `json:"isGroup,omitempty"`
 	IsFromMe  bool   `json:"isFromMe,omitempty"`
+	// Prekey messages from this sender device whose session was not stored
+	// (state="false"), counted since the bridge started.
+	StatelessPrekeys int `json:"statelessPrekeys,omitempty"`
 }
 
 // RawEventSource represents the source of a raw event
@@ -1815,8 +1818,10 @@ func extractURLFromLPHP(addr string) string {
 
 func (c *Client) undecryptableErrorEvent(e *events.UndecryptableMessage) *ErrorEvent {
 	reason := ""
+	stateless := 0
 	if c.decryptFailures != nil {
 		reason = c.decryptFailures.take(e.Info.ID)
+		stateless = c.decryptFailures.statelessCount(e.Info.Sender.String())
 	}
 	if reason == "" {
 		if e.IsUnavailable {
@@ -1834,5 +1839,7 @@ func (c *Client) undecryptableErrorEvent(e *events.UndecryptableMessage) *ErrorE
 		SenderJID: e.Info.Sender.String(),
 		IsGroup:   e.Info.IsGroup,
 		IsFromMe:  e.Info.IsFromMe,
+
+		StatelessPrekeys: stateless,
 	}
 }

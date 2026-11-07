@@ -334,7 +334,7 @@ Sự kiện `error` theo `code`:
 | `1` | Kết nối Messenger lỗi vĩnh viễn |
 | `2` | Tin E2EE không giải mã được |
 
-Sự kiện code `2` có thêm `reason`, `messageId`, `chatJid`, `senderJid`, `isGroup`, `isFromMe`. `reason` lấy từ lỗi whatsmeow ghi ngay trước sự kiện `UndecryptableMessage` (`bridge/decrypt_failures.go`), kể cả khi `logLevel` là `none`:
+Sự kiện code `2` có thêm `reason`, `messageId`, `chatJid`, `senderJid`, `isGroup`, `isFromMe`, và `statelessPrekeys` khi có (số tin mở phiên `pkmsg` mang `state="false"` từ thiết bị gửi đó kể từ lúc bridge chạy: whatsmeow giải mã nhưng không lưu phiên, nên nếu thiết bị gửi tiếp tục dùng phiên này thì các tin sau lỗi `no_session` hoặc `bad_mac`). `reason` lấy từ lỗi whatsmeow ghi ngay trước sự kiện `UndecryptableMessage` (`bridge/decrypt_failures.go`), kể cả khi `logLevel` là `none`:
 
 | `reason` | Ý nghĩa |
 |---|---|

@@ -144,6 +144,17 @@ def test_decrypt_failure_labels_reason_without_raw_ids() -> None:
     assert decrypt_failure(None) is None
 
 
+def test_decrypt_history_message_mentions_stateless_prekeys() -> None:
+    failure = decrypt_failure(_decrypt_error(reason="no_session", statelessPrekeys=2))
+    assert failure is not None and failure["stateless_prekeys"] == 2
+    assert "2 tin mở phiên kiểu stateless" in decrypt_history_message(failure)
+
+    for value in (0, -1, True, "3", None):
+        plain = decrypt_failure(_decrypt_error(statelessPrekeys=value))
+        assert plain is not None and plain["stateless_prekeys"] == 0
+        assert "stateless" not in decrypt_history_message(plain)
+
+
 def test_decrypt_watch_alerts_once_per_device_after_distinct_messages() -> None:
     now = [0.0]
     watch = DecryptFailureWatch(threshold=3, window=100, clock=lambda: now[0])

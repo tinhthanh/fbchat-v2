@@ -16,6 +16,11 @@ import (
 // no error, so the log call is the only place the cause is visible.
 const decryptErrorLogFormat = "Error decrypting message %s from %s: %v"
 
+// whatsmeow (decryptDM) logs this when a prekey message carries state="false":
+// it decrypts the message but drops the new Signal session. If the sender keeps
+// using that session, every later message fails (no_session or bad_mac).
+const statelessPrekeyLogFormat = "Not storing session from stateless prekey message from %s"
+
 const maxPendingDecryptFailures = 256
 
 // Decrypt failure reasons reported in the error event (code 2).
@@ -68,10 +73,33 @@ type decryptFailures struct {
 	mu      sync.Mutex
 	reasons map[string]string
 	order   []string
+	// sender JID -> stateless prekey messages seen (sessions not stored)
+	stateless      map[string]int
+	statelessOrder []string
 }
 
 func newDecryptFailures() *decryptFailures {
-	return &decryptFailures{reasons: make(map[string]string)}
+	return &decryptFailures{reasons: make(map[string]string), stateless: make(map[string]int)}
+}
+
+func (d *decryptFailures) markStateless(sender string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if _, ok := d.stateless[sender]; !ok {
+		d.statelessOrder = append(d.statelessOrder, sender)
+	}
+	d.stateless[sender]++
+	for len(d.statelessOrder) > maxPendingDecryptFailures {
+		delete(d.stateless, d.statelessOrder[0])
+		d.statelessOrder = d.statelessOrder[1:]
+	}
+}
+
+// statelessCount returns how many stateless prekey messages came from sender.
+func (d *decryptFailures) statelessCount(sender string) int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.stateless[sender]
 }
 
 func (d *decryptFailures) put(messageID, reason string) {
@@ -126,6 +154,13 @@ func (l *decryptFailureLog) Warnf(msg string, args ...any) {
 		}
 	}
 	l.Logger.Warnf(msg, args...)
+}
+
+func (l *decryptFailureLog) Debugf(msg string, args ...any) {
+	if msg == statelessPrekeyLogFormat && len(args) == 1 {
+		l.failures.markStateless(fmt.Sprint(args[0]))
+	}
+	l.Logger.Debugf(msg, args...)
 }
 
 // signalLog sends libsignal's logs to the bridge logger. Its default logger

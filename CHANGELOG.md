@@ -17,7 +17,8 @@ phiên bản tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 - Sự kiện `error` code 2 (tin E2EE không giải mã được) có thêm `reason`
   (`bad_mac`, `no_session`, `no_sender_key`...), `messageId`, `chatJid`,
   `senderJid`, `isGroup`, `isFromMe`. Bridge bắt lỗi từ log của whatsmeow nên có
-  lý do cả khi `logLevel` là `none`.
+  lý do cả khi `logLevel` là `none`. `statelessPrekeys` đếm tin mở phiên
+  `state="false"` của thiết bị gửi (whatsmeow không lưu phiên của các tin này).
 - Deploy (fb-bot của fork): xem [deploy/README.md](deploy/README.md).
 
 > Các thay đổi website dưới đây hiện chỉ nằm trong working copy `website/` đang

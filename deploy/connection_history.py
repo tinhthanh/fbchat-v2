@@ -247,14 +247,30 @@ def decrypt_failure(data: Any) -> dict[str, Any] | None:
         "message_id": str(data.get("messageId") or ""),
         "group": bool(data.get("isGroup")),
         "from_me": bool(data.get("isFromMe")),
+        "stateless_prekeys": _non_negative_int(data.get("statelessPrekeys")),
     }
+
+
+def _non_negative_int(value: Any) -> int:
+    return (
+        value
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0
+        else 0
+    )
 
 
 def decrypt_history_message(failure: dict[str, Any]) -> str:
     where = "nhóm" if failure["group"] else "chat 1-1"
     device = f", thiết bị {failure['device']}" if failure["device"] else ""
     own = " của chính tài khoản" if failure["from_me"] else ""
-    return f"Tin E2EE không giải mã được ({where}{device}{own}): {failure['label']}"
+    message = f"Tin E2EE không giải mã được ({where}{device}{own}): {failure['label']}"
+    stateless = failure.get("stateless_prekeys", 0)
+    if stateless:
+        message += (
+            f"; thiết bị này đã gửi {stateless} tin mở phiên kiểu stateless"
+            " (state=false) nên bot không lưu phiên"
+        )
+    return message
 
 
 class DecryptFailureWatch:

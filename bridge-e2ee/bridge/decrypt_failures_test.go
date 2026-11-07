@@ -73,6 +73,27 @@ func TestDecryptFailureLogRecordsReasonAndForwards(t *testing.T) {
 	}
 }
 
+func TestDecryptFailureLogCountsStatelessPrekeys(t *testing.T) {
+	inner := &recordingWaLog{}
+	failures := newDecryptFailures()
+	log := newDecryptFailureLog(inner, failures)
+	sender := waTypes.NewADJID("456", 0, 57)
+	sender.Server = waTypes.MessengerServer
+
+	log.Debugf(statelessPrekeyLogFormat, sender)
+	log.Debugf(statelessPrekeyLogFormat, sender)
+	log.Debugf("Decrypting message from %s", sender)
+
+	if got := failures.statelessCount(sender.String()); got != 2 {
+		t.Fatalf("statelessCount = %d, want 2", got)
+	}
+	c := &Client{decryptFailures: failures}
+	info := waTypes.MessageInfo{MessageSource: waTypes.MessageSource{Sender: sender}, ID: "MSG3"}
+	if got := c.undecryptableErrorEvent(&events.UndecryptableMessage{Info: info}); got.StatelessPrekeys != 2 {
+		t.Fatalf("event StatelessPrekeys = %d, want 2", got.StatelessPrekeys)
+	}
+}
+
 func TestDecryptFailuresIsBounded(t *testing.T) {
 	failures := newDecryptFailures()
 	for i := 0; i < maxPendingDecryptFailures+10; i++ {
@@ -141,5 +162,8 @@ func TestWhatsmeowStillLogsDecryptErrorFormat(t *testing.T) {
 	}
 	if !strings.Contains(string(source), `cli.Log.Warnf("`+decryptErrorLogFormat+`", info.ID, info.SourceString(), err)`) {
 		t.Fatal("whatsmeow no longer logs decrypt errors with decryptErrorLogFormat; update decrypt_failures.go")
+	}
+	if !strings.Contains(string(source), `cli.Log.Debugf("`+statelessPrekeyLogFormat+`", from)`) {
+		t.Fatal("whatsmeow no longer logs stateless prekey messages with statelessPrekeyLogFormat; update decrypt_failures.go")
 	}
 }
