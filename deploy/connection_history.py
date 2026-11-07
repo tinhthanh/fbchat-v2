@@ -249,7 +249,15 @@ def decrypt_failure(data: Any) -> dict[str, Any] | None:
         "group": bool(data.get("isGroup")),
         "from_me": bool(data.get("isFromMe")),
         "stateless_prekeys": _non_negative_int(data.get("statelessPrekeys")),
+        "enc_type": data.get("encType") if data.get("encType") in _ENC_TYPES else "",
     }
+
+
+_ENC_TYPES = {
+    "pkmsg": "tin mở phiên",
+    "msg": "tin thường",
+    "skmsg": "tin nhóm",
+}
 
 
 def _non_negative_int(value: Any) -> int:
@@ -264,7 +272,11 @@ def decrypt_history_message(failure: dict[str, Any]) -> str:
     where = "nhóm" if failure["group"] else "chat 1-1"
     device = f", thiết bị {failure['device']}" if failure["device"] else ""
     own = " của chính tài khoản" if failure["from_me"] else ""
-    message = f"Tin E2EE không giải mã được ({where}{device}{own}): {failure['label']}"
+    kind = _ENC_TYPES.get(failure.get("enc_type", ""))
+    kind = f", {kind}" if kind else ""
+    message = (
+        f"Tin E2EE không giải mã được ({where}{device}{own}{kind}): {failure['label']}"
+    )
     stateless = failure.get("stateless_prekeys", 0)
     if stateless:
         message += (

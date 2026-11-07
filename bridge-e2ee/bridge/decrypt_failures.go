@@ -3,6 +3,7 @@ package bridge
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/rs/zerolog"
@@ -69,12 +70,38 @@ func classifyDecryptError(err error) string {
 	return DecryptReasonOther
 }
 
+// Which ciphertext failed, from whatsmeow's error wrapping (message.go):
+// a prekey message opens a new session, a normal message uses an existing one.
+const (
+	DecryptKindPrekey = "pkmsg"
+	DecryptKindNormal = "msg"
+	DecryptKindGroup  = "skmsg"
+)
+
+func decryptErrorKind(err error) string {
+	text := err.Error()
+	switch {
+	case strings.Contains(text, "prekey message"):
+		return DecryptKindPrekey
+	case strings.Contains(text, "normal message"):
+		return DecryptKindNormal
+	case strings.Contains(text, "group message"):
+		return DecryptKindGroup
+	}
+	return ""
+}
+
+type decryptFailure struct {
+	reason string
+	kind   string
+}
+
 // decryptFailures maps message ID -> reason between the whatsmeow log call and
 // the UndecryptableMessage event. Bounded: a reason whose event never comes
 // (e.g. a cancelled context) is evicted oldest first.
 type decryptFailures struct {
 	mu      sync.Mutex
-	reasons map[string]string
+	reasons map[string]decryptFailure
 	order   []string
 	// sender JID -> stateless prekey messages seen (sessions not stored)
 	stateless      map[string]int
@@ -82,7 +109,7 @@ type decryptFailures struct {
 }
 
 func newDecryptFailures() *decryptFailures {
-	return &decryptFailures{reasons: make(map[string]string), stateless: make(map[string]int)}
+	return &decryptFailures{reasons: make(map[string]decryptFailure), stateless: make(map[string]int)}
 }
 
 func (d *decryptFailures) markStateless(sender string) {
@@ -105,26 +132,26 @@ func (d *decryptFailures) statelessCount(sender string) int {
 	return d.stateless[sender]
 }
 
-func (d *decryptFailures) put(messageID, reason string) {
+func (d *decryptFailures) put(messageID string, failure decryptFailure) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if _, ok := d.reasons[messageID]; !ok {
 		d.order = append(d.order, messageID)
 	}
-	d.reasons[messageID] = reason
+	d.reasons[messageID] = failure
 	for len(d.order) > maxPendingDecryptFailures {
 		delete(d.reasons, d.order[0])
 		d.order = d.order[1:]
 	}
 }
 
-// take returns and forgets the reason recorded for messageID ("" if none).
-func (d *decryptFailures) take(messageID string) string {
+// take returns and forgets the failure recorded for messageID (zero if none).
+func (d *decryptFailures) take(messageID string) decryptFailure {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	reason, ok := d.reasons[messageID]
+	failure, ok := d.reasons[messageID]
 	if !ok {
-		return ""
+		return decryptFailure{}
 	}
 	delete(d.reasons, messageID)
 	for i, id := range d.order {
@@ -133,7 +160,7 @@ func (d *decryptFailures) take(messageID string) string {
 			break
 		}
 	}
-	return reason
+	return failure
 }
 
 // decryptFailureLog wraps whatsmeow's client logger to capture decrypt errors.
@@ -153,7 +180,7 @@ func newDecryptFailureLog(inner waLog.Logger, failures *decryptFailures) waLog.L
 func (l *decryptFailureLog) Warnf(msg string, args ...any) {
 	if msg == decryptErrorLogFormat && len(args) == 3 {
 		if err, ok := args[2].(error); ok {
-			l.failures.put(fmt.Sprint(args[0]), classifyDecryptError(err))
+			l.failures.put(fmt.Sprint(args[0]), decryptFailure{reason: classifyDecryptError(err), kind: decryptErrorKind(err)})
 		}
 	}
 	l.Logger.Warnf(msg, args...)

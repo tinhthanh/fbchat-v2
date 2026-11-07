@@ -142,7 +142,7 @@ Browser sign-in uses the `fb-login-ui` service (`login/` image, `control.py` com
 
 For every message that fails to decrypt (`error` event code 2, except `reason=unavailable`):
 
-- It is recorded in the account history (Channel accounts page) with `kind: "decrypt"`: group or 1-1 chat, a sender device tag (first 8 hex characters of the SHA-256 of the JID, no raw ID) and the reason. If that device sent session-opening messages with `state=false` (the bridge does not store their session), the entry also gives how many. Consecutive failures from the same device are merged into one entry.
+- It is recorded in the account history (Channel accounts page) with `kind: "decrypt"`: group or 1-1 chat, a sender device tag (first 8 hex characters of the SHA-256 of the JID, no raw ID), which ciphertext failed (session-opening, normal or group message) and the reason. If that device sent session-opening messages with `state=false` (the bridge does not store their session), the entry also gives how many. Consecutive failures from the same device are merged into one entry.
 - When one sender device has 3 distinct messages fail within 24 hours, the bot alerts once through the gateway's `POST /v1/alert` (Telegram, per the Alerts page). The bridge retries each message a few times with the same ID, so the count is per message ID.
 
 `bad_mac` (mismatching MAC) means the Signal session between the bot's device and one of the sender's devices is out of sync. It does not heal by itself: the bridge asks for a resend, but Messenger keeps encrypting with the old session. To fix it:

@@ -66,11 +66,26 @@ func TestDecryptFailureLogRecordsReasonAndForwards(t *testing.T) {
 	if len(inner.warnings) != 2 {
 		t.Fatalf("inner logger got %d warnings, want 2", len(inner.warnings))
 	}
-	if got := failures.take("MSG1"); got != DecryptReasonBadMAC {
-		t.Fatalf("take(MSG1) = %q, want %q", got, DecryptReasonBadMAC)
+	want := decryptFailure{reason: DecryptReasonBadMAC}
+	if got := failures.take("MSG1"); got != want {
+		t.Fatalf("take(MSG1) = %+v, want %+v", got, want)
 	}
-	if got := failures.take("MSG1"); got != "" {
-		t.Fatalf("second take(MSG1) = %q, want empty", got)
+	if got := failures.take("MSG1"); got != (decryptFailure{}) {
+		t.Fatalf("second take(MSG1) = %+v, want empty", got)
+	}
+}
+
+func TestDecryptErrorKindFromWhatsmeowWrapping(t *testing.T) {
+	cases := map[string]string{
+		"failed to decrypt prekey message: x": DecryptKindPrekey,
+		"failed to decrypt normal message: x": DecryptKindNormal,
+		"failed to decrypt group message: x":  DecryptKindGroup,
+		"something else":                      "",
+	}
+	for text, want := range cases {
+		if got := decryptErrorKind(errors.New(text)); got != want {
+			t.Errorf("decryptErrorKind(%q) = %q, want %q", text, got, want)
+		}
 	}
 }
 
@@ -98,17 +113,17 @@ func TestDecryptFailureLogCountsStatelessPrekeys(t *testing.T) {
 func TestDecryptFailuresIsBounded(t *testing.T) {
 	failures := newDecryptFailures()
 	for i := 0; i < maxPendingDecryptFailures+10; i++ {
-		failures.put(fmt.Sprintf("m%d", i), DecryptReasonBadMAC)
+		failures.put(fmt.Sprintf("m%d", i), decryptFailure{reason: DecryptReasonBadMAC})
 	}
 	if len(failures.reasons) != maxPendingDecryptFailures || len(failures.order) != maxPendingDecryptFailures {
 		t.Fatalf("size = %d/%d, want %d", len(failures.reasons), len(failures.order), maxPendingDecryptFailures)
 	}
-	if got := failures.take("m0"); got != "" {
-		t.Fatalf("oldest entry should be evicted, got %q", got)
+	if got := failures.take("m0"); got != (decryptFailure{}) {
+		t.Fatalf("oldest entry should be evicted, got %+v", got)
 	}
 	last := fmt.Sprintf("m%d", maxPendingDecryptFailures+9)
-	if got := failures.take(last); got != DecryptReasonBadMAC {
-		t.Fatalf("newest entry = %q", got)
+	if got := failures.take(last); got.reason != DecryptReasonBadMAC {
+		t.Fatalf("newest entry = %+v", got)
 	}
 }
 
@@ -120,10 +135,10 @@ func TestUndecryptableErrorEventCarriesReason(t *testing.T) {
 		MessageSource: waTypes.MessageSource{Chat: chat, Sender: sender, IsGroup: true},
 		ID:            "MSG2",
 	}
-	c.decryptFailures.put("MSG2", DecryptReasonBadMAC)
+	c.decryptFailures.put("MSG2", decryptFailure{reason: DecryptReasonBadMAC, kind: DecryptKindPrekey})
 
 	got := c.undecryptableErrorEvent(&events.UndecryptableMessage{Info: info})
-	if got.Code != 2 || got.Reason != DecryptReasonBadMAC || got.MessageID != "MSG2" ||
+	if got.Code != 2 || got.Reason != DecryptReasonBadMAC || got.EncType != DecryptKindPrekey || got.MessageID != "MSG2" ||
 		got.ChatJID != chat.String() || got.SenderJID != sender.String() || !got.IsGroup {
 		t.Fatalf("unexpected event: %+v", got)
 	}
@@ -163,6 +178,11 @@ func TestWhatsmeowStillLogsDecryptErrorFormat(t *testing.T) {
 	}
 	if !strings.Contains(string(source), `cli.Log.Warnf("`+decryptErrorLogFormat+`", info.ID, info.SourceString(), err)`) {
 		t.Fatal("whatsmeow no longer logs decrypt errors with decryptErrorLogFormat; update decrypt_failures.go")
+	}
+	for _, wrap := range []string{"failed to decrypt prekey message: %w", "failed to decrypt normal message: %w", "failed to decrypt group message: %w"} {
+		if !strings.Contains(string(source), wrap) {
+			t.Fatalf("whatsmeow no longer wraps decrypt errors as %q; update decryptErrorKind", wrap)
+		}
 	}
 	if !strings.Contains(string(source), `cli.Log.Debugf("`+statelessPrekeyLogFormat+`", from)`) {
 		t.Fatal("whatsmeow no longer logs stateless prekey messages with statelessPrekeyLogFormat; update decrypt_failures.go")

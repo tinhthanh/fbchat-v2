@@ -179,6 +179,7 @@ type ErrorEvent struct {
 	Code    int    `json:"code,omitempty"`
 	// Only for code 2 (undecryptable E2EE message).
 	Reason    string `json:"reason,omitempty"`
+	EncType   string `json:"encType,omitempty"` // pkmsg, msg or skmsg
 	MessageID string `json:"messageId,omitempty"`
 	ChatJID   string `json:"chatJid,omitempty"`
 	SenderJID string `json:"senderJid,omitempty"`
@@ -1817,12 +1818,13 @@ func extractURLFromLPHP(addr string) string {
 }
 
 func (c *Client) undecryptableErrorEvent(e *events.UndecryptableMessage) *ErrorEvent {
-	reason := ""
+	var failure decryptFailure
 	stateless := 0
 	if c.decryptFailures != nil {
-		reason = c.decryptFailures.take(e.Info.ID)
+		failure = c.decryptFailures.take(e.Info.ID)
 		stateless = c.decryptFailures.statelessCount(e.Info.Sender.String())
 	}
+	reason := failure.reason
 	if reason == "" {
 		if e.IsUnavailable {
 			reason = DecryptReasonUnavailable
@@ -1834,6 +1836,7 @@ func (c *Client) undecryptableErrorEvent(e *events.UndecryptableMessage) *ErrorE
 		Message:   "E2EE message could not be decrypted or was unavailable",
 		Code:      2,
 		Reason:    reason,
+		EncType:   failure.kind,
 		MessageID: e.Info.ID,
 		ChatJID:   e.Info.Chat.String(),
 		SenderJID: e.Info.Sender.String(),

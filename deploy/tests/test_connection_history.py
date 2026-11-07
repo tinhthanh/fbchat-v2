@@ -144,6 +144,18 @@ def test_decrypt_failure_labels_reason_without_raw_ids() -> None:
     assert decrypt_failure(None) is None
 
 
+def test_decrypt_history_message_names_failed_ciphertext() -> None:
+    failure = decrypt_failure(
+        _decrypt_error(reason="no_valid_session", encType="pkmsg")
+    )
+    assert failure is not None and failure["enc_type"] == "pkmsg"
+    assert "tin mở phiên" in decrypt_history_message(failure)
+
+    unknown = decrypt_failure(_decrypt_error(encType="weird"))
+    assert unknown is not None and unknown["enc_type"] == ""
+    assert "tin thường" not in decrypt_history_message(unknown)
+
+
 def test_decrypt_history_message_mentions_stateless_prekeys() -> None:
     failure = decrypt_failure(_decrypt_error(reason="no_session", statelessPrekeys=2))
     assert failure is not None and failure["stateless_prekeys"] == 2

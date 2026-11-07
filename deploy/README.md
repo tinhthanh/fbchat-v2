@@ -142,7 +142,7 @@ Tên/ảnh của chính tài khoản lấy từ `/chat/user_info`; một số t�
 
 Mỗi tin không giải mã được (sự kiện `error` code 2, trừ `reason=unavailable`):
 
-- Ghi vào lịch sử tài khoản (trang Tài khoản kênh) với `kind: "decrypt"`: nhóm hay chat 1-1, mã thiết bị gửi (8 ký tự đầu SHA-256 của JID, không lộ ID) và lý do. Nếu thiết bị đó từng gửi tin mở phiên `state=false` (bridge không lưu phiên) thì mục ghi thêm số tin này. Các lần liền nhau từ cùng thiết bị gộp một mục.
+- Ghi vào lịch sử tài khoản (trang Tài khoản kênh) với `kind: "decrypt"`: nhóm hay chat 1-1, mã thiết bị gửi (8 ký tự đầu SHA-256 của JID, không lộ ID), loại bản mã lỗi (tin mở phiên, tin thường, tin nhóm) và lý do. Nếu thiết bị đó từng gửi tin mở phiên `state=false` (bridge không lưu phiên) thì mục ghi thêm số tin này. Các lần liền nhau từ cùng thiết bị gộp một mục.
 - Cùng một thiết bị gửi có 3 tin khác nhau lỗi trong 24 giờ thì báo một lần qua `POST /v1/alert` của gateway (Telegram theo trang Cảnh báo). Bridge thử lại mỗi tin vài lần với cùng ID nên đếm theo ID tin.
 
 `bad_mac` (MAC không khớp) nghĩa là phiên Signal giữa thiết bị của bot và một thiết bị của người gửi đã lệch. Lỗi này không tự hết: bridge xin gửi lại nhưng Messenger vẫn mã hoá bằng phiên cũ. Cách sửa:
