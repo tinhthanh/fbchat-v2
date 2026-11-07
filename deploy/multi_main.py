@@ -51,6 +51,7 @@ from connection_history import (
     decrypt_history_message,
     describe_run_error,
     diagnose_session,
+    key_check_message,
 )
 from gateway_link import (
     META_EVENT_TYPES,
@@ -360,6 +361,10 @@ class AccountBot(SimpleBot):
                 self._loop.call_soon_threadsafe(
                     self._apply_connection_status, {"state": "connected"}
                 )
+        elif kind == "e2eeKeyCheck":
+            message = key_check_message(event.get("data"))
+            if message:
+                history.record("keycheck", message)
         elif kind == "error":
             label = classify_bridge_error(event.get("data"))
             if label:

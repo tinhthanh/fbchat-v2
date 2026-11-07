@@ -911,6 +911,11 @@ func (c *Client) handleE2EEEvent(evt interface{}) {
 	case *events.Connected:
 		c.clearTransportFailure(true)
 		c.emitEvent(EventTypeE2EEConnected, nil)
+		if e2eeClient := c.snapshotE2EEClient(); e2eeClient != nil {
+			go func() {
+				c.emitEvent(EventTypeE2EEKeyCheck, c.checkOwnKeys(e2eeClient))
+			}()
+		}
 
 	case *events.Disconnected:
 		c.emitConnectionFailure(true, transientConnectionFailure(nil))

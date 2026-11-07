@@ -532,6 +532,7 @@ Các loại event thường gặp:
 |---|---|
 | `ready` | Client bridge sẵn sàng |
 | `e2eeConnected` | E2EE handshake xong |
+| `e2eeKeyCheck` | Khoá E2EE server phát cho thiết bị bot có khớp khoá bot giữ không (chỉ cờ, không có khoá; xem `bridge-e2ee/README.md`) |
 | `message` | Tin thường |
 | `e2eeMessage` | Tin nhắn trực tiếp đã giải mã |
 | `reconnected` | Transport nối lại |

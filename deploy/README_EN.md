@@ -112,7 +112,7 @@ The bot's HTTP server (same `GATEWAY_TOKEN` as `/send`) also serves routes for t
 
 | Route | Action |
 |---|---|
-| `GET /accounts` | Accounts: `name`, `state` (`starting`, `running`, `retrying`, `dropped`, `stopped`), `profile` (`uid`, `displayName`, `avatar`), `error` (last error: `session_expired` when the cookie no longer yields dataFB, sign in again; `connection` otherwise; on expiry `message` adds "Nguyên nhân: …" and `cause`: `revoked` Facebook deleted the `c_user`/`xs` cookies, `checkpoint`, `login`, `token`, `unknown`), `history` (connection history, newest first: `at`, `kind` `connected`/`manual`/`network`/`disconnected`/`platform`/`session_expired`, `message`, `count`/`last_at` when repeated; saved in `<account>/history.json` 0600, at most 30 entries) |
+| `GET /accounts` | Accounts: `name`, `state` (`starting`, `running`, `retrying`, `dropped`, `stopped`), `profile` (`uid`, `displayName`, `avatar`), `error` (last error: `session_expired` when the cookie no longer yields dataFB, sign in again; `connection` otherwise; on expiry `message` adds "Nguyên nhân: …" and `cause`: `revoked` Facebook deleted the `c_user`/`xs` cookies, `checkpoint`, `login`, `token`, `unknown`), `history` (connection history, newest first: `at`, `kind` `connected`/`manual`/`network`/`disconnected`/`platform`/`session_expired`/`decrypt`/`keycheck`, `message`, `count`/`last_at` when repeated; saved in `<account>/history.json` 0600, at most 30 entries) |
 | `POST /accounts/<name>/cookie` `{"cookie": "..."}` | Internal only (the UI signs in with the browser). The cookie must contain `c_user` and `xs`; the bot runs `dataGetHome` to check it with Facebook (422 when rejected, nothing saved), then writes `config.json` (0600) and starts the account |
 | `POST /accounts/<name>/restart` | Reconnect (also used after a browser sign-in) |
 | `DELETE /accounts/<name>` | Stop and delete the account directory |
@@ -149,6 +149,8 @@ For every message that fails to decrypt (`error` event code 2, except `reason=un
 
 1. The sender logs out and back in to Messenger on that device (a new device means a new session).
 2. If the device is unknown or several senders fail: stop the account, rename `e2ee_device.json` and start it again so the bot becomes a new E2EE device (Facebook sees one more device; messages that already failed are not recovered).
+
+Each time E2EE connects, the history also gets a `keycheck` entry: whether the E2EE keys the server hands out for the bot's device match the keys the bot holds (and which ones differ). On a mismatch nobody can open a new session with the bot.
 
 Payload debugging: `FBBOT_TRACE=acc2,shop2` (comma-separated account names) writes every raw listener event, including types the bot ignores (such as call signals), to `/data/trace/<name>-<UTC time>.jsonl` (mode `0600`, at most 20 MiB per file). The file holds message content: enable it only for test accounts, then delete the file and unset the variable.
 

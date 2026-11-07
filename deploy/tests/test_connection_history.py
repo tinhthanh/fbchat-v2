@@ -15,6 +15,7 @@ from connection_history import (
     classify_raw_event,
     decrypt_failure,
     decrypt_history_message,
+    key_check_message,
     describe_run_error,
     device_tag,
     diagnose_session,
@@ -190,3 +191,23 @@ def test_decrypt_watch_alerts_once_per_device_after_distinct_messages() -> None:
 
     # Thiếu thiết bị hoặc ID tin (bridge cũ): không đếm được, không báo.
     assert watch.observe({"device": "", "message_id": "M9"}) == 0
+
+
+def test_key_check_message() -> None:
+    ok = {
+        "fetched": True,
+        "identityMatch": True,
+        "registrationMatch": True,
+        "signedPreKeyMatch": True,
+        "preKeyPresent": True,
+        "preKeyKnown": True,
+        "preKeyMatch": True,
+    }
+    assert key_check_message(ok) == "Khoá E2EE trên server khớp khoá bot giữ"
+    assert "signed prekey" in key_check_message({**ok, "signedPreKeyMatch": False})
+    assert "không còn giữ" in key_check_message({**ok, "preKeyKnown": False})
+    assert key_check_message({**ok, "preKeyPresent": False}).endswith(
+        "khớp khoá bot giữ"
+    )
+    assert key_check_message({"fetched": False}).startswith("Không kiểm tra được")
+    assert key_check_message(None) is None

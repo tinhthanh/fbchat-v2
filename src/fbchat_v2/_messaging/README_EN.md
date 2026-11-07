@@ -472,7 +472,7 @@ chain and identifies the failed step, so the outer timeout does not hide the cau
 }
 ```
 
-Common event types include `ready`, `e2eeConnected`, `message`, `e2eeMessage`, `reconnected`, `disconnected`, `error`, and `bridge_fatal`.
+Common event types include `ready`, `e2eeConnected`, `e2eeKeyCheck` (whether the E2EE keys the server hands out for the bot's device match the keys it holds; flags only, see `bridge-e2ee/README.md`), `message`, `e2eeMessage`, `reconnected`, `disconnected`, `error`, and `bridge_fatal`.
 
 An `error` event without a `code` is a transient socket drop that the bridge reconnects from by itself; `code` 1 is a permanent connection failure and `code` 2 is an E2EE message that could not be decrypted, with `reason` (e.g. `bad_mac`, `no_session`, `no_sender_key`; full table in `bridge-e2ee/README.md`), `messageId`, `chatJid`, `senderJid`, `isGroup`, `isFromMe`, `encType` (`pkmsg`, `msg`, `skmsg`) and, when present, `statelessPrekeys`. `bridge_error_label(data)` returns the matching log label without exposing the payload.
 

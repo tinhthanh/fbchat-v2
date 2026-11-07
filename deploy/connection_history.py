@@ -286,6 +286,30 @@ def decrypt_history_message(failure: dict[str, Any]) -> str:
     return message
 
 
+_KEY_CHECK_PARTS = (
+    ("identityMatch", "khoá danh tính"),
+    ("registrationMatch", "registration ID"),
+    ("signedPreKeyMatch", "signed prekey"),
+)
+
+
+def key_check_message(data: Any) -> str | None:
+    """Câu lịch sử cho event "e2eeKeyCheck" (khoá trên server so với khoá bot giữ)."""
+    if not isinstance(data, dict):
+        return None
+    if data.get("fetched") is not True:
+        return "Không kiểm tra được khoá E2EE trên server"
+    wrong = [name for key, name in _KEY_CHECK_PARTS if data.get(key) is not True]
+    if data.get("preKeyPresent") is True:
+        if data.get("preKeyKnown") is not True:
+            wrong.append("one-time prekey (bot không còn giữ ID này)")
+        elif data.get("preKeyMatch") is not True:
+            wrong.append("one-time prekey")
+    if not wrong:
+        return "Khoá E2EE trên server khớp khoá bot giữ"
+    return "Khoá E2EE trên server LỆCH khoá bot giữ: " + ", ".join(wrong)
+
+
 class DecryptFailureWatch:
     """Đếm tin không giải mã được theo thiết bị gửi để báo một lần khi lỗi lặp lại.
 

@@ -112,7 +112,7 @@ Server HTTP của bot (cùng `GATEWAY_TOKEN` với `/send`) có thêm các route
 
 | Route | Việc |
 |---|---|
-| `GET /accounts` | Danh sách: `name`, `state` (`starting`, `running`, `retrying`, `dropped`, `stopped`), `profile` (`uid`, `displayName`, `avatar`), `error` (lỗi gần nhất: `session_expired` khi cookie không còn cho ra dataFB, cần đăng nhập lại; `connection` cho lỗi khác; hết phiên thì `message` kèm "Nguyên nhân: …" và `cause`: `revoked` Facebook xoá cookie `c_user`/`xs`, `checkpoint`, `login`, `token`, `unknown`), `history` (lịch sử kết nối, mới nhất trước: `at`, `kind` `connected`/`manual`/`network`/`disconnected`/`platform`/`session_expired`, `message`, `count`/`last_at` khi lặp; lưu ở `<tài khoản>/history.json` 0600, tối đa 30 mốc) |
+| `GET /accounts` | Danh sách: `name`, `state` (`starting`, `running`, `retrying`, `dropped`, `stopped`), `profile` (`uid`, `displayName`, `avatar`), `error` (lỗi gần nhất: `session_expired` khi cookie không còn cho ra dataFB, cần đăng nhập lại; `connection` cho lỗi khác; hết phiên thì `message` kèm "Nguyên nhân: …" và `cause`: `revoked` Facebook xoá cookie `c_user`/`xs`, `checkpoint`, `login`, `token`, `unknown`), `history` (lịch sử kết nối, mới nhất trước: `at`, `kind` `connected`/`manual`/`network`/`disconnected`/`platform`/`session_expired`/`decrypt`/`keycheck`, `message`, `count`/`last_at` khi lặp; lưu ở `<tài khoản>/history.json` 0600, tối đa 30 mốc) |
 | `POST /accounts/<tên>/cookie` `{"cookie": "..."}` | Chỉ dùng nội bộ (giao diện chỉ đăng nhập bằng trình duyệt). Cookie phải có `c_user` và `xs`; bot gọi `dataGetHome` để kiểm tra với Facebook (422 nếu bị từ chối, không lưu), rồi ghi `config.json` (0600) và chạy tài khoản |
 | `POST /accounts/<tên>/restart` | Kết nối lại (cũng dùng sau khi đăng nhập bằng trình duyệt) |
 | `DELETE /accounts/<tên>` | Dừng và xoá thư mục tài khoản |
@@ -149,6 +149,8 @@ Mỗi tin không giải mã được (sự kiện `error` code 2, trừ `reason=
 
 1. Người gửi đăng xuất rồi đăng nhập lại Messenger trên thiết bị đó (thiết bị mới thì phiên mới).
 2. Nếu không biết thiết bị nào hoặc nhiều người cùng lỗi: dừng tài khoản, đổi tên `e2ee_device.json` rồi chạy lại để bot thành thiết bị E2EE mới (Facebook thấy thêm một thiết bị; tin đã lỗi không lấy lại được).
+
+Mỗi lần E2EE kết nối, lịch sử có thêm mục `keycheck`: khoá E2EE server phát cho thiết bị bot khớp hay lệch khoá bot giữ (lệch khoá nào). Lệch thì người khác không mở được phiên mới với bot.
 
 Debug payload: `FBBOT_TRACE=acc2,shop2` (tên tài khoản, cách nhau bởi dấu phẩy) ghi mọi sự kiện thô của listener, kể cả loại bot đang bỏ qua (vd. tín hiệu cuộc gọi), vào `/data/trace/<tên>-<giờ UTC>.jsonl` (quyền `0600`, tối đa 20 MiB mỗi tệp). Tệp có nội dung tin nhắn: chỉ bật cho tài khoản thử, xoá tệp và tắt biến khi xong.
 

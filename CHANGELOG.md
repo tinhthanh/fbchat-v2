@@ -19,6 +19,9 @@ phiên bản tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
   `senderJid`, `isGroup`, `isFromMe`. Bridge bắt lỗi từ log của whatsmeow nên có
   lý do cả khi `logLevel` là `none`. `statelessPrekeys` đếm tin mở phiên
   `state="false"` của thiết bị gửi (whatsmeow không lưu phiên của các tin này).
+- Sự kiện bridge `e2eeKeyCheck` sau mỗi `e2eeConnected`: so gói khoá server phát
+  cho thiết bị bot với khoá bot giữ (chỉ cờ khớp/lệch); sự kiện `error` code 2 có
+  thêm `encType` (`pkmsg`, `msg`, `skmsg`) và lý do `no_valid_session`.
 - Deploy (fb-bot của fork): xem [deploy/README.md](deploy/README.md).
 
 > Các thay đổi website dưới đây hiện chỉ nằm trong working copy `website/` đang

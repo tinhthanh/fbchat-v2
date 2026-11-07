@@ -322,6 +322,7 @@ Event lifecycle:
 |---|---|
 | `ready` | Client đã sẵn sàng |
 | `e2eeConnected` | E2EE handshake hoàn tất |
+| `e2eeKeyCheck` | Sau mỗi `e2eeConnected`: bridge lấy gói khoá của chính thiết bị bot từ server (tốn một one-time prekey) và so với khoá đang giữ. Chỉ có cờ `fetched`, `identityMatch`, `registrationMatch`, `signedPreKeyMatch`, `preKeyPresent`, `preKeyKnown`, `preKeyMatch` (và `error` khi không lấy được), không có khoá. Lệch thì mọi tin mở phiên người khác gửi tới đều lỗi `no_valid_session` |
 | `reconnected` | Transport reconnect |
 | `disconnected` | Mất kết nối |
 | `error` | Lỗi protocol/transport, phân theo `code` (xem bên dưới) |
