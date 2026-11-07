@@ -26,6 +26,7 @@ import re
 import shutil
 import tempfile
 import time
+from collections import OrderedDict
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -94,6 +95,11 @@ TRACE_ACCOUNTS = {
 }
 TRACE_DIR = ACCOUNTS_DIR.parent / "trace"
 TRACE_MAX_BYTES = 20 << 20
+# Tin không giải mã được thường tới lại ngay sau khi bridge xin gửi lại (tin
+# nhóm khi bot chưa có khoá nhóm của người gửi): chờ rồi mới đăng tin báo lỗi,
+# bỏ nếu tin thật cùng ID đã tới.
+UNDECRYPTABLE_GRACE_SECONDS = 15.0
+ARRIVED_IDS_MAX = 2048
 _gateway: GatewayLink | None = None
 
 _account_states: dict[str, str] = {}
@@ -245,6 +251,8 @@ class AccountBot(SimpleBot):
         self._reconnecting = False
         self._trace = open_trace(account)
         self._decrypt_watch = DecryptFailureWatch()
+        # ID tin thật đã chuyển gateway (chỉ đọc/ghi trên event loop).
+        self._arrived_ids: OrderedDict[str, None] = OrderedDict()
 
     async def run(self) -> None:
         self._loop = asyncio.get_running_loop()
@@ -272,10 +280,25 @@ class AccountBot(SimpleBot):
             self._reconnecting = False
             _mark_running(self.account)
 
+    def _note_arrived(self, message_id: str) -> None:
+        self._arrived_ids[message_id] = None
+        self._arrived_ids.move_to_end(message_id)
+        while len(self._arrived_ids) > ARRIVED_IDS_MAX:
+            self._arrived_ids.popitem(last=False)
+
+    async def _forward_undecryptable(self, lost: dict[str, Any]) -> None:
+        """Đăng tin báo lỗi giải mã sau thời gian chờ, trừ khi tin thật đã tới."""
+        original = str(lost["messageID"]).removeprefix("undecryptable-")
+        await asyncio.sleep(UNDECRYPTABLE_GRACE_SECONDS)
+        if original in self._arrived_ids or _gateway is None:
+            return
+        await _gateway.forward(self.account, self, lost)
+
     async def _dispatch(self, message: dict[str, Any]) -> None:
         if _gateway is not None:
             sender_id = str(message.get("userID") or "")
             if message.get("messageID"):
+                self._note_arrived(str(message["messageID"]))
                 if sender_id == str(self.dataFB.get("FacebookID")):
                     # Chủ tài khoản gửi từ thiết bị khác: ghi chú, không phải tin khách.
                     await _gateway.forward_owner(self.account, self, message)
@@ -313,7 +336,7 @@ class AccountBot(SimpleBot):
                     )
                 if lost is not None:
                     asyncio.run_coroutine_threadsafe(
-                        _gateway.forward(self.account, self, lost), loop
+                        self._forward_undecryptable(lost), loop
                     )
             except RuntimeError:
                 pass  # loop đã đóng khi đang tắt

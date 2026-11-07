@@ -618,3 +618,32 @@ async def test_decrypt_failures_recorded_and_alerted_once(
     assert items[0]["count"] == 5 and "MAC không khớp" in items[0]["message"]
     assert len(alerts) == 1
     assert "3 tin E2EE trong nhóm" in alerts[0] and "100012" not in alerts[0]
+
+
+@pytest.mark.asyncio
+async def test_undecryptable_placeholder_skipped_when_real_message_arrives(
+    monkeypatch: pytest.MonkeyPatch,
+    mock_dataFB: dict[str, Any],
+    fake_listener: _FakeListener,
+) -> None:
+    # Nhóm 07/11/2026: lần gửi đầu thiếu khoá nhóm, tin thật tới sau 1 giây.
+    forwarded: list[str] = []
+
+    class _Gateway:
+        async def forward(self, account: str, bot: Any, message: dict) -> None:
+            forwarded.append(message["messageID"])
+
+    monkeypatch.setattr(multi_main, "_gateway", _Gateway())
+    monkeypatch.setattr(multi_main, "UNDECRYPTABLE_GRACE_SECONDS", 0.05)
+    bot = multi_main.AccountBot(mock_dataFB, account="acc1", device_path="/d.json")
+
+    late = asyncio.create_task(
+        bot._forward_undecryptable({"messageID": "undecryptable-M1"})
+    )
+    lost = asyncio.create_task(
+        bot._forward_undecryptable({"messageID": "undecryptable-M2"})
+    )
+    await bot._dispatch({"messageID": "M1", "userID": "200", "body": "hi"})
+    await asyncio.gather(late, lost)
+
+    assert forwarded == ["M1", "undecryptable-M2"]
