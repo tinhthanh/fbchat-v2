@@ -165,19 +165,36 @@ func (d *decryptFailures) take(messageID string) decryptFailure {
 
 // decryptFailureLog wraps whatsmeow's client logger to capture decrypt errors.
 // It records the reason even when the bridge log level hides the line.
+// It also turns sender key and retry lines into events through senderKey.
 type decryptFailureLog struct {
 	waLog.Logger
-	failures *decryptFailures
+	failures  *decryptFailures
+	senderKey func(SenderKeyEvent)
 }
 
-func newDecryptFailureLog(inner waLog.Logger, failures *decryptFailures) waLog.Logger {
+func newDecryptFailureLog(inner waLog.Logger, failures *decryptFailures, senderKey func(SenderKeyEvent)) waLog.Logger {
 	if inner == nil {
 		inner = waLog.Noop
 	}
-	return &decryptFailureLog{Logger: inner, failures: failures}
+	return &decryptFailureLog{Logger: inner, failures: failures, senderKey: senderKey}
+}
+
+func (l *decryptFailureLog) reportSenderKey(msg string, args []any) {
+	if l.senderKey == nil {
+		return
+	}
+	if event, ok := senderKeyLogEvent(msg, args); ok {
+		l.senderKey(event)
+	}
+}
+
+func (l *decryptFailureLog) Errorf(msg string, args ...any) {
+	l.reportSenderKey(msg, args)
+	l.Logger.Errorf(msg, args...)
 }
 
 func (l *decryptFailureLog) Warnf(msg string, args ...any) {
+	l.reportSenderKey(msg, args)
 	if msg == decryptErrorLogFormat && len(args) == 3 {
 		if err, ok := args[2].(error); ok {
 			l.failures.put(fmt.Sprint(args[0]), decryptFailure{reason: classifyDecryptError(err), kind: decryptErrorKind(err)})
@@ -190,6 +207,7 @@ func (l *decryptFailureLog) Debugf(msg string, args ...any) {
 	if msg == statelessPrekeyLogFormat && len(args) == 1 {
 		l.failures.markStateless(fmt.Sprint(args[0]))
 	}
+	l.reportSenderKey(msg, args)
 	l.Logger.Debugf(msg, args...)
 }
 

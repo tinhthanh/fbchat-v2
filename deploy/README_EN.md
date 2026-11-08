@@ -154,6 +154,8 @@ Since 03/11/2026 newer Messenger apps send Signal messages with new protobuf fie
 
 Each time E2EE connects, the history also gets a `keycheck` entry: whether the E2EE keys the server hands out for the bot's device match the keys the bot holds (and which ones differ). On a mismatch nobody can open a new session with the bot.
 
+fb-bot logs each group sender key event (`e2eeSenderKey`) with the `[e2ee-key]` tag and only a hashed device tag: which retry a group message was, whether it carried the sender key, which device's sender key was stored. When a sender key step fails (the key cannot be stored, it arrives in a 1-1 chat, a retry request cannot be sent) the history also gets a `decrypt` entry.
+
 Payload debugging: `FBBOT_TRACE=acc2,shop2` (comma-separated account names) writes every raw listener event, including types the bot ignores (such as call signals), to `/data/trace/<name>-<UTC time>.jsonl` (mode `0600`, at most 20 MiB per file). The file holds message content: enable it only for test accounts, then delete the file and unset the variable.
 
 ## 🔄 Syncing with upstream

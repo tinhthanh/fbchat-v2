@@ -958,6 +958,9 @@ func (c *Client) handleE2EEEvent(evt interface{}) {
 		c.emitConnectionFailure(true, transientConnectionFailure(nil))
 
 	case *events.FBMessage:
+		if event, ok := groupMessageSenderKeyEvent(e); ok {
+			c.emitEvent(EventTypeE2EESenderKey, event)
+		}
 		if !c.claimE2EEMessageID(e.Info.ID) {
 			return
 		}

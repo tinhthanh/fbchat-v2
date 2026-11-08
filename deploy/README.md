@@ -154,6 +154,8 @@ Từ 03/11/2026 app Messenger mới gửi tin Signal có trường protobuf mớ
 
 Mỗi lần E2EE kết nối, lịch sử có thêm mục `keycheck`: khoá E2EE server phát cho thiết bị bot khớp hay lệch khoá bot giữ (lệch khoá nào). Lệch thì người khác không mở được phiên mới với bot.
 
+fb-bot in mỗi sự kiện khoá nhóm (`e2eeSenderKey`) ra log với nhãn `[e2ee-key]`, chỉ kèm mã thiết bị đã băm: tin nhóm là lần gửi lại thứ mấy, có kèm khoá nhóm không, đã lưu khoá nhóm của thiết bị nào. Khi bước khoá nhóm hỏng (không lưu được khoá, khoá đến trong chat 1-1, không gửi được yêu cầu gửi lại) thì ghi thêm mục `decrypt` vào lịch sử.
+
 Debug payload: `FBBOT_TRACE=acc2,shop2` (tên tài khoản, cách nhau bởi dấu phẩy) ghi mọi sự kiện thô của listener, kể cả loại bot đang bỏ qua (vd. tín hiệu cuộc gọi), vào `/data/trace/<tên>-<giờ UTC>.jsonl` (quyền `0600`, tối đa 20 MiB mỗi tệp). Tệp có nội dung tin nhắn: chỉ bật cho tài khoản thử, xoá tệp và tắt biến khi xong.
 
 ## 🔄 Đồng bộ với upstream

@@ -16,6 +16,7 @@ from connection_history import (
     decrypt_failure,
     decrypt_history_message,
     key_check_message,
+    sender_key_message,
     describe_run_error,
     device_tag,
     diagnose_session,
@@ -211,3 +212,24 @@ def test_key_check_message() -> None:
     )
     assert key_check_message({"fetched": False}).startswith("Không kiểm tra được")
     assert key_check_message(None) is None
+
+
+def test_sender_key_message() -> None:
+    sender = "100012:3@msgr"
+    message, alert = sender_key_message(
+        {"kind": "message", "sender": sender, "retryCount": 2, "hasSkdm": True}
+    )
+    assert not alert and "gửi lại lần 2" in message and "kèm khoá nhóm: có" in message
+    assert device_tag(sender) in message and "100012" not in message
+    message, _ = sender_key_message(
+        {"kind": "message", "sender": sender, "isFromMe": True}
+    )
+    assert "gửi lại lần 0" in message and "của chính tài khoản" in message
+    assert sender_key_message({"kind": "stored", "sender": sender}) == (
+        f"Đã lưu khoá nhóm của thiết bị {device_tag(sender)}",
+        False,
+    )
+    message, alert = sender_key_message({"kind": "retry_lost", "error": "limit"})
+    assert alert and message.endswith("không gửi được yêu cầu gửi lại (limit)")
+    assert sender_key_message({"kind": "weird"}) is None
+    assert sender_key_message(None) is None

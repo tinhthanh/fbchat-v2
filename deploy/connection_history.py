@@ -310,6 +310,44 @@ def key_check_message(data: Any) -> str | None:
     return "Khoá E2EE trên server LỆCH khoá bot giữ: " + ", ".join(wrong)
 
 
+_SENDER_KEY_ALERTS = {
+    "failed": "không lưu được khoá nhóm",
+    "non_group": "khoá nhóm gửi trong chat 1-1, bị bỏ qua",
+    "retry_lost": "không gửi được yêu cầu gửi lại",
+}
+
+
+def sender_key_message(data: Any) -> tuple[str, bool] | None:
+    """Câu log cho event "e2eeSenderKey" và có cần ghi vào lịch sử không.
+
+    Chỉ ghi lịch sử khi bước khoá nhóm hỏng: tin nhóm bình thường ghi mỗi tin
+    sẽ đẩy các mốc kết nối ra khỏi lịch sử ngắn.
+    """
+    if not isinstance(data, dict):
+        return None
+    kind = str(data.get("kind") or "")
+    sender = data.get("sender")
+    device = device_tag(sender) if isinstance(sender, str) and sender else "?"
+    if data.get("isFromMe") is True:
+        device += " của chính tài khoản"
+    if kind == "message":
+        retry = _non_negative_int(data.get("retryCount"))
+        skdm = "có" if data.get("hasSkdm") is True else "không"
+        return (
+            f"Tin nhóm từ thiết bị {device}: gửi lại lần {retry}, kèm khoá nhóm: {skdm}",
+            False,
+        )
+    if kind == "stored":
+        return f"Đã lưu khoá nhóm của thiết bị {device}", False
+    label = _SENDER_KEY_ALERTS.get(kind)
+    if label is None:
+        return None
+    error = str(data.get("error") or "")
+    suffix = f" ({error})" if error else ""
+    who = f", thiết bị {device}" if sender else ""
+    return f"Khoá nhóm E2EE: {label}{who}{suffix}", True
+
+
 class DecryptFailureWatch:
     """Đếm tin không giải mã được theo thiết bị gửi để báo một lần khi lỗi lặp lại.
 

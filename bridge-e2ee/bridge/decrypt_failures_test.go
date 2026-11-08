@@ -58,7 +58,7 @@ func (r *recordingWaLog) Sub(string) waLog.Logger { return r }
 func TestDecryptFailureLogRecordsReasonAndForwards(t *testing.T) {
 	inner := &recordingWaLog{}
 	failures := newDecryptFailures()
-	log := newDecryptFailureLog(inner, failures)
+	log := newDecryptFailureLog(inner, failures, nil)
 
 	log.Warnf(decryptErrorLogFormat, waTypes.MessageID("MSG1"), "sender", fmt.Errorf("x: %w", signalerror.ErrBadMAC))
 	log.Warnf("Unhandled encrypted message (type %s) from %s", "foo", "bar")
@@ -92,7 +92,7 @@ func TestDecryptErrorKindFromWhatsmeowWrapping(t *testing.T) {
 func TestDecryptFailureLogCountsStatelessPrekeys(t *testing.T) {
 	inner := &recordingWaLog{}
 	failures := newDecryptFailures()
-	log := newDecryptFailureLog(inner, failures)
+	log := newDecryptFailureLog(inner, failures, nil)
 	sender := waTypes.NewADJID("456", 0, 57)
 	sender.Server = waTypes.MessengerServer
 

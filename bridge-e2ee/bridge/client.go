@@ -338,7 +338,9 @@ func (c *Client) connectE2EE(operations e2eeConnectOperations) (err error) {
 		return errors.New("prepared E2EE client is nil")
 	}
 	if c.decryptFailures != nil {
-		e2eeClient.Log = newDecryptFailureLog(e2eeClient.Log, c.decryptFailures)
+		e2eeClient.Log = newDecryptFailureLog(e2eeClient.Log, c.decryptFailures, func(event SenderKeyEvent) {
+			c.emitEvent(EventTypeE2EESenderKey, event)
+		})
 	}
 	var eventHandlerID uint32
 	eventHandlerRegistered := false

@@ -53,6 +53,7 @@ from connection_history import (
     describe_run_error,
     diagnose_session,
     key_check_message,
+    sender_key_message,
 )
 from gateway_link import (
     META_EVENT_TYPES,
@@ -388,6 +389,14 @@ class AccountBot(SimpleBot):
             message = key_check_message(event.get("data"))
             if message:
                 history.record("keycheck", message)
+        elif kind == "e2eeSenderKey":
+            result = sender_key_message(event.get("data"))
+            if result is not None:
+                message, alert = result
+                # Listener thread không mang LOG_LABEL: gắn tên tài khoản tay.
+                _upstream_log(f"{self.account}] [e2ee-key", message)
+                if alert:
+                    history.record("decrypt", message)
         elif kind == "error":
             label = classify_bridge_error(event.get("data"))
             if label:

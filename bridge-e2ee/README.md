@@ -323,6 +323,7 @@ Event lifecycle:
 | `ready` | Client đã sẵn sàng |
 | `e2eeConnected` | E2EE handshake hoàn tất |
 | `e2eeKeyCheck` | Sau mỗi `e2eeConnected`: bridge lấy gói khoá của chính thiết bị bot từ server (tốn một one-time prekey) và so với khoá đang giữ. Chỉ có cờ `fetched`, `identityMatch`, `registrationMatch`, `signedPreKeyMatch`, `preKeyPresent`, `preKeyKnown`, `preKeyMatch` (và `error` khi không lấy được), không có khoá. Lệch thì mọi tin mở phiên người khác gửi tới đều lỗi `no_valid_session` |
+| `e2eeSenderKey` | Khoá nhóm (sender key) của tin nhóm E2EE. `kind`: `message` (tin nhóm giải mã được; `retryCount` là lần gửi lại, `hasSkdm` cho biết tin có kèm khoá nhóm), `stored` (đã lưu khoá nhóm của `sender`), `failed` (không đọc hoặc lưu được khoá nhóm; `error` là nhóm lỗi), `non_group` (khoá nhóm đến trong chat 1-1, bị bỏ qua), `retry_lost` (không gửi được yêu cầu gửi lại hoặc đã hết lượt; `error`). `sender` là JID thiết bị gửi, `isFromMe` khi là thiết bị khác của chính tài khoản. Không có khoá hay nội dung tin. Tin nhóm nào cũng cần gửi lại mới giải mã được là dấu hiệu khoá nhóm không tới hoặc không được lưu |
 | `reconnected` | Transport reconnect |
 | `disconnected` | Mất kết nối |
 | `error` | Lỗi protocol/transport, phân theo `code` (xem bên dưới) |

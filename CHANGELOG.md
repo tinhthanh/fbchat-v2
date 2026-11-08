@@ -22,6 +22,8 @@ phiên bản tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 - Sự kiện bridge `e2eeKeyCheck` sau mỗi `e2eeConnected`: so gói khoá server phát
   cho thiết bị bot với khoá bot giữ (chỉ cờ khớp/lệch); sự kiện `error` code 2 có
   thêm `encType` (`pkmsg`, `msg`, `skmsg`) và lý do `no_valid_session`.
+- Sự kiện bridge `e2eeSenderKey`: tin nhóm có kèm khoá nhóm không, lần gửi lại thứ
+  mấy, lưu khoá nhóm được không (không có khoá); fb-bot in ra log `[e2ee-key]`.
 - Deploy (fb-bot của fork): xem [deploy/README.md](deploy/README.md).
 
 > Các thay đổi website dưới đây hiện chỉ nằm trong working copy `website/` đang

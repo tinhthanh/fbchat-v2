@@ -647,3 +647,34 @@ async def test_undecryptable_placeholder_skipped_when_real_message_arrives(
     await asyncio.gather(late, lost)
 
     assert forwarded == ["M1", "undecryptable-M2"]
+
+
+def test_sender_key_events_logged_and_failures_recorded(
+    monkeypatch: pytest.MonkeyPatch,
+    mock_dataFB: dict[str, Any],
+    fake_listener: _FakeListener,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(multi_main, "_account_history", {})
+    bot = multi_main.AccountBot(mock_dataFB, account="acc1", device_path="/d.json")
+    sender = "100012:3@msgr"
+
+    bot._record_lifecycle(
+        {
+            "type": "e2eeSenderKey",
+            "data": {"kind": "message", "sender": sender, "retryCount": 1},
+        }
+    )
+    bot._record_lifecycle(
+        {
+            "type": "e2eeSenderKey",
+            "data": {"kind": "failed", "sender": sender, "error": "other"},
+        }
+    )
+
+    out = capsys.readouterr().out
+    assert "[acc1] [e2ee-key]" in out and "gửi lại lần 1" in out
+    assert "100012" not in out
+    items = multi_main.account_history("acc1").items
+    assert [item["kind"] for item in items] == ["decrypt"]
+    assert "không lưu được khoá nhóm" in items[0]["message"]
