@@ -282,6 +282,25 @@ class BridgeActions:
         return base64.b64decode(result["data"], validate=True)
 
     @staticmethod
+    def _user_info_params(user_id: int | str) -> dict[str, Any]:
+        uid = int(user_id)
+        if uid <= 0:
+            raise ValueError("user_id phải là ID Facebook dương.")
+        return {"userId": uid}
+
+    def get_user_info_blocking(self, user_id: int | str) -> dict[str, Any]:
+        return self._call_blocking("getUserInfo", self._user_info_params(user_id))
+
+    async def get_user_info(self, user_id: int | str) -> dict[str, Any]:
+        """Tên, ảnh đại diện của một user từ danh bạ Messenger (qua socket bridge).
+
+        Dùng được cả với người không phải bạn bè, khi ``/chat/user_info/`` không
+        trả hồ sơ. Kết quả: ``id``, ``name``, ``firstName``, ``username``,
+        ``profilePictureUrl``... Không tìm thấy thì raise ``BridgeError``.
+        """
+        return await self._call("getUserInfo", self._user_info_params(user_id))
+
+    @staticmethod
     def _download_e2ee_params(
         direct_path: str,
         media_key: str,

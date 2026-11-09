@@ -310,7 +310,13 @@ sàng. Bridge không tự chuyển nội dung đó sang kết nối thường.
 | `downloadMedia` | Tải media thường và trả base64 |
 | `downloadE2EEMedia` | Tải, verify và giải mã media E2EE |
 
-Python chưa có hàm bọc công khai cho mọi Go RPC. `BridgeActions` hỗ trợ edit, unsend, typing, mark-read, ảnh/audio E2EE và tải media. Các RPC còn lại có thể cần thêm wrapper.
+### Danh bạ
+
+| Method | Mục đích |
+|---|---|
+| `getUserInfo` | `{"userId": <số>}`: tên, ảnh (`profilePictureUrl`), `firstName`, `username` của một user từ danh bạ Messenger (task `GetContactsFull` qua socket đang mở, giới hạn 20 giây). Dùng được cả với người không phải bạn bè. Không tìm thấy thì lỗi `user not found` |
+
+Python chưa có hàm bọc công khai cho mọi Go RPC. `BridgeActions` hỗ trợ edit, unsend, typing, mark-read, ảnh/audio E2EE, tải media và tra danh bạ (`get_user_info`). Các RPC còn lại có thể cần thêm wrapper.
 
 ---
 

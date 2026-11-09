@@ -595,34 +595,64 @@ type GetUserInfoOptions struct {
 	UserID int64 `json:"userId"`
 }
 
-// GetUserInfo gets detailed information about a user
+// userInfoTimeout bounds one contact lookup over the Messenger socket.
+const userInfoTimeout = 20 * time.Second
+
+// GetUserInfo gets detailed information about a user from Messenger's contact
+// table over the existing socket. It also works for people who are not friends,
+// where Facebook's /chat/user_info/ returns no profile.
 func (c *Client) GetUserInfo(opts *GetUserInfoOptions) (*ContactInfo, error) {
+	if opts == nil || opts.UserID <= 0 {
+		return nil, fmt.Errorf("userId is required")
+	}
 	task := &socket.GetContactsFullTask{
 		ContactID: opts.UserID,
 	}
-	tbl, err := c.Messagix.ExecuteTasks(c.ctx, task)
+	ctx, cancel := context.WithTimeout(c.ctx, userInfoTimeout)
+	defer cancel()
+	tbl, err := c.Messagix.ExecuteTasks(ctx, task)
 	if err != nil {
 		return nil, err
 	}
 
-	if tbl != nil {
-		for _, contact := range tbl.LSDeleteThenInsertContact {
-			if contact.Id == opts.UserID {
-				return &ContactInfo{
-					ID:                contact.Id,
-					Name:              contact.Name,
-					FirstName:         contact.FirstName,
-					Username:          contact.Username,
-					ProfilePictureUrl: contact.GetAvatarURL(),
-					IsMessengerUser:   contact.IsMessengerUser,
-					Gender:            int64(contact.Gender),
-					CanViewerMessage:  contact.CanViewerMessage,
-				}, nil
+	if info := contactInfoFromTable(tbl, opts.UserID); info != nil {
+		return info, nil
+	}
+	return nil, fmt.Errorf("user not found: %d", opts.UserID)
+}
+
+// contactInfoFromTable finds userID in a GetContactsFull response.
+func contactInfoFromTable(tbl *table.LSTable, userID int64) *ContactInfo {
+	if tbl == nil {
+		return nil
+	}
+	for _, contact := range tbl.LSDeleteThenInsertContact {
+		if contact.Id == userID {
+			return &ContactInfo{
+				ID:                contact.Id,
+				Name:              contact.Name,
+				FirstName:         contact.FirstName,
+				Username:          contact.Username,
+				ProfilePictureUrl: contact.GetAvatarURL(),
+				IsMessengerUser:   contact.IsMessengerUser,
+				Gender:            int64(contact.Gender),
+				CanViewerMessage:  contact.CanViewerMessage,
 			}
 		}
 	}
-
-	return nil, fmt.Errorf("user not found: %d", opts.UserID)
+	// Người lạ (chưa trong danh bạ) có khi chỉ có dòng này.
+	for _, contact := range tbl.LSVerifyContactRowExists {
+		if contact.ContactId == userID && contact.Name != "" {
+			return &ContactInfo{
+				ID:                contact.ContactId,
+				Name:              contact.Name,
+				FirstName:         contact.FirstName,
+				ProfilePictureUrl: contact.ProfilePictureUrl,
+				Gender:            int64(contact.Gender),
+			}
+		}
+	}
+	return nil
 }
 
 // ==================== E2EE Media Functions ====================

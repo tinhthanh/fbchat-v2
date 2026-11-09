@@ -678,6 +678,15 @@ content = result["data"]
 
 Wrapper giải mã base64 thành bytes và giữ các metadata còn lại trong dict.
 
+Tên và ảnh của một user lấy từ danh bạ Messenger qua socket bridge đang mở, dùng được cả với người không phải bạn bè (khi `_get_user_info` không trả hồ sơ):
+
+```python
+info = await actions.get_user_info("100012345678")
+name, avatar = info["name"], info.get("profilePictureUrl", "")
+```
+
+Không tìm thấy thì raise `BridgeError`; ID không phải số dương thì raise `ValueError`.
+
 ---
 
 ## 🔐 Standalone E2EE sender

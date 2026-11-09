@@ -685,6 +685,55 @@ async def test_unknown_name_falls_back_to_readable_label(
 
 
 @pytest.mark.asyncio
+async def test_stranger_name_from_messenger_contacts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 09/11/2026: người lạ nhắn `default`, /chat/user_info không trả hồ sơ nên
+    # hội thoại mang tên "Facebook <id>", không ảnh. Bridge hỏi danh bạ Messenger.
+    async def no_name(dataFB: dict[str, Any], user_id: str, **_: Any) -> dict[str, Any]:
+        return {"error": 1}
+
+    class _ContactBridge(_FakeBridge):
+        async def call(
+            self,
+            method: str,
+            params: dict[str, Any] | None = None,
+            timeout: float = 60.0,
+        ) -> dict[str, Any]:
+            self.calls.append((method, params or {}))
+            if (params or {}).get("userId") == 42:
+                return {
+                    "id": 42,
+                    "name": " Người Lạ ",
+                    "profilePictureUrl": "https://cdn/p.jpg",
+                }
+            raise RuntimeError("user not found")
+
+    monkeypatch.setattr(gateway_link._get_user_info, "func", no_name)
+    link, calls = _recording_link()
+    bot = _Bot()
+    bridge = _ContactBridge()
+    bot.listener._bridge = bridge  # type: ignore[attr-defined]
+    await link.forward(
+        "shop",
+        bot,
+        {"messageID": "m1", "userID": "42", "body": "hi", "chatJid": "42@msgr"},
+    )
+    assert bridge.calls == [("getUserInfo", {"userId": 42})]
+    inbound = calls[0][1]
+    assert inbound["thread_name"] == "Người Lạ" and inbound["sender_name"] == "Người Lạ"
+    assert inbound["thread_avatar"] == "https://cdn/p.jpg"
+
+    # Danh bạ cũng không có: vẫn nhãn dễ đọc, không lỗi.
+    await link.forward(
+        "shop",
+        bot,
+        {"messageID": "m2", "userID": "43", "body": "hi", "chatJid": "43@msgr"},
+    )
+    assert calls[-1][1]["sender_name"] == "Facebook 43"
+
+
+@pytest.mark.asyncio
 async def test_e2ee_group_name_and_picture_from_raw_tables(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

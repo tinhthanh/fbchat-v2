@@ -668,13 +668,37 @@ class GatewayLink:
             info = await _get_user_info.func(bot.dataFB, user_id, client=self.http)
             info = info if isinstance(info, dict) else {}
             name, avatar = info.get("nameUser"), info.get("thumbSrc")
+            if not (isinstance(name, str) and name.strip()):
+                # /chat/user_info không trả hồ sơ người lạ (nhắn lần đầu, không
+                # phải bạn bè): hỏi danh bạ Messenger qua socket bridge đang mở.
+                name, avatar = await self._contact_profile(bot, user_id)
             cached = (
-                name if isinstance(name, str) else "",
+                name.strip() if isinstance(name, str) else "",
                 avatar if isinstance(avatar, str) else "",
                 now,
             )
             self._names[user_id] = cached
         return cached[0], cached[1]
+
+    async def _contact_profile(self, bot: _Bot, user_id: str) -> tuple[Any, Any]:
+        """(tên, ảnh) từ danh bạ Messenger qua bridge; ("", "") nếu không có."""
+        bridge = _bridge_of(bot)
+        if bridge is None or not user_id.isdigit():
+            return "", ""
+        try:
+            info = await BridgeActions(bridge).get_user_info(user_id)  # type: ignore[arg-type]
+        except Exception as error:  # bridge chưa nối, không tìm thấy, hết giờ
+            self.log(
+                "gateway",
+                f"Không tra được tên Facebook {user_id} qua danh bạ: {type(error).__name__}",
+            )
+            return "", ""
+        if not isinstance(info, dict):
+            return "", ""
+        picture = info.get("profilePictureUrl")
+        if not (isinstance(picture, str) and picture.startswith("https://")):
+            picture = ""
+        return info.get("name"), picture
 
     async def _user_name(self, bot: _Bot, user_id: str) -> str:
         return (await self._user_profile(bot, user_id))[0]

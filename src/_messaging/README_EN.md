@@ -589,6 +589,15 @@ content = result["data"]
 
 The wrapper decodes base64 into bytes and preserves other metadata.
 
+A user's name and picture come from Messenger's contact table over the open bridge socket. This also works for people who are not friends, when `_get_user_info` returns no profile:
+
+```python
+info = await actions.get_user_info("100012345678")
+name, avatar = info["name"], info.get("profilePictureUrl", "")
+```
+
+Raises `BridgeError` when the user is not found and `ValueError` when the ID is not a positive number.
+
 ---
 
 ## 🔐 Standalone E2EE sender

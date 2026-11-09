@@ -589,6 +589,23 @@ func handle(req *request) {
 		}
 		ok(req.ID, res)
 
+	case "getUserInfo":
+		if client == nil {
+			fail(req.ID, fmt.Errorf("client not initialised"))
+			return
+		}
+		var opts bridge.GetUserInfoOptions
+		if err := json.Unmarshal(req.Params, &opts); err != nil {
+			fail(req.ID, err)
+			return
+		}
+		info, err := client.GetUserInfo(&opts)
+		if err != nil {
+			fail(req.ID, err)
+			return
+		}
+		ok(req.ID, info)
+
 	case "disconnect":
 		if client != nil {
 			client.Disconnect()

@@ -761,6 +761,7 @@ Public async actions:
 | `send_e2ee_image(chat_jid, data, ...)` | Gửi image bytes |
 | `download_media(url)` | Download media thường thành bytes |
 | `download_e2ee_media(...)` | Download và giải mã media E2EE |
+| `get_user_info(user_id)` | Tên, ảnh của user từ danh bạ Messenger (cả người không phải bạn bè) |
 
 Ví dụ gửi ảnh:
 

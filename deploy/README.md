@@ -132,7 +132,7 @@ Tên/ảnh của chính tài khoản lấy từ `/chat/user_info`; một số t�
 - Sự kiện nhóm Facebook (đổi tên, thêm/rời/xoá thành viên, quản trị viên) cũng đọc từ bảng LightSpeed (`LSSyncUpdateThreadName`, `LSAddParticipantIdToGroupThread`, `LSRemoveParticipantFromThread`, `LSUpdateThreadParticipantAdminStatus`) thành ghi chú `group_event`. Các bảng này cũng là dữ liệu đồng bộ lúc kết nối, nên bot chỉ báo khi khác trạng thái đã biết: đổi tên khi tên khác tên đã biết, thêm thành viên/đổi quản trị chỉ khi đã thấy danh sách thành viên nhóm đó và lô không phải ảnh chụp cả hội thoại. Thà bỏ sót còn hơn báo sai cả loạt mỗi lần khởi động.
 - `AccountBot._forward_listener_event` chặn `e2eeReaction`, `reaction`, `messageEdit`, `messageUnsend` (SimpleBot upstream lọc bỏ) và gửi `POST /v1/event`, thành ghi chú nội bộ. Cảm xúc gửi thêm `target_ids` (messageId), `reactor_id` (ID người thả, `self` cho chủ tài khoản) và `reaction` (emoji, rỗng khi bỏ) để gateway hiện huy hiệu trên đúng tin; không tìm được tin thì vẫn là ghi chú.
 - Tin có `senderId` là chính tài khoản (gửi từ thiết bị khác) thành ghi chú `owner_message`; tin do bot gửi qua `/send` được nhận ra bằng `messageId` trả về hoặc trùng nội dung trong 60 giây.
-- Tên Facebook không tra được (ẩn hồ sơ / không phải bạn bè) dùng nhãn `Facebook <id>` và được tra lại sau 1 giờ.
+- Tên Facebook: `/chat/user_info` trước; không có hồ sơ (người lạ, không phải bạn bè) thì hỏi danh bạ Messenger qua bridge (`get_user_info`, cả ảnh đại diện). Cả hai không có thì dùng nhãn `Facebook <id>` và tra lại sau 1 giờ.
 
 ### Trạng thái thiết bị E2EE
 
