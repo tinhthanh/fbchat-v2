@@ -34,3 +34,17 @@ async def test_get_user_info_rejects_invalid_id(user_id: object) -> None:
     with pytest.raises(ValueError):
         await BridgeActions(bridge).get_user_info(user_id)  # type: ignore[arg-type]
     assert bridge.calls == []
+
+
+@pytest.mark.asyncio
+async def test_get_e2ee_group_info_requires_group_jid() -> None:
+    bridge = _Bridge()
+    actions = BridgeActions(bridge)  # type: ignore[arg-type]
+    await actions.get_e2ee_group_info("385@g.us")
+    actions.get_e2ee_group_info_blocking("386@g.us")
+    assert bridge.calls == [
+        ("getE2EEGroupInfo", {"chatJid": "385@g.us"}),
+        ("getE2EEGroupInfo", {"chatJid": "386@g.us"}),
+    ]
+    with pytest.raises(ValueError):
+        await actions.get_e2ee_group_info("42@msgr")

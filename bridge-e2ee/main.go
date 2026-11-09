@@ -606,6 +606,23 @@ func handle(req *request) {
 		}
 		ok(req.ID, info)
 
+	case "getE2EEGroupInfo":
+		if client == nil {
+			fail(req.ID, fmt.Errorf("client not initialised"))
+			return
+		}
+		var opts bridge.GetE2EEGroupInfoOptions
+		if err := json.Unmarshal(req.Params, &opts); err != nil {
+			fail(req.ID, err)
+			return
+		}
+		info, err := client.GetE2EEGroupInfo(&opts)
+		if err != nil {
+			fail(req.ID, err)
+			return
+		}
+		ok(req.ID, info)
+
 	case "disconnect":
 		if client != nil {
 			client.Disconnect()

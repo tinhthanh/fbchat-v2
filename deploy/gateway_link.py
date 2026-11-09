@@ -426,6 +426,8 @@ class GatewayLink:
         # "tài khoản:threadKey" -> {"name", "picture"}: tên/ảnh nhóm đọc từ bảng
         # LightSpeed trong sự kiện raw (tin E2EE không mang tên nhóm).
         self._threads: OrderedDict[str, dict[str, str]] = OrderedDict()
+        # Lần cuối hỏi tên nhóm E2EE qua bridge (theo tài khoản:nhóm), để không hỏi mỗi tin.
+        self._group_lookups: OrderedDict[str, float] = OrderedDict()
         # "tài khoản:threadKey" -> {contactId: isAdmin}: thành viên nhóm đã thấy, để
         # chỉ báo thay đổi thật chứ không báo cả danh sách mỗi lần đồng bộ.
         self._members: OrderedDict[str, dict[str, bool]] = OrderedDict()
@@ -629,14 +631,21 @@ class GatewayLink:
                     f"{change}-{key}-{value}-{minute}",
                 )
 
-    def _remember_thread(self, account: str, key: Any, name: Any, picture: Any) -> None:
+    def _remember_thread(
+        self,
+        account: str,
+        key: Any,
+        name: Any,
+        picture: Any,
+        source: str = "bảng LightSpeed",
+    ) -> None:
         if not key:
             return
         cache_key = f"{account}:{key}"
         entry = dict(self._threads.get(cache_key) or {})
         if isinstance(name, str) and name.strip():
             if "name" not in entry:
-                self.log("gateway", f"Đã biết tên nhóm {key} (từ bảng LightSpeed).")
+                self.log("gateway", f"Đã biết tên nhóm {key} (từ {source}).")
             entry["name"] = name.strip()
         if isinstance(picture, str) and picture.startswith("https://"):
             entry["picture"] = picture
@@ -646,6 +655,42 @@ class GatewayLink:
         self._threads.move_to_end(cache_key)
         while len(self._threads) > RECENT_MAX:
             self._threads.popitem(last=False)
+
+    async def _e2ee_group_info(
+        self, account: str, bot: _Bot, thread_id: str
+    ) -> dict[str, str]:
+        """Như ``group_info``; nhóm E2EE chưa biết tên thì hỏi server qua bridge.
+
+        Bảng LightSpeed chỉ nhắc tên nhóm khi Messenger đồng bộ đúng nhóm đó, và
+        bộ nhớ mất khi bot khởi động lại: tin nhóm sau đó không có tên. Hỏi lại
+        tối đa mỗi giờ một lần cho mỗi nhóm.
+        """
+        group = self.group_info(account, thread_id)
+        bridge = _bridge_of(bot)
+        if group.get("name") or bridge is None or not thread_id.startswith("e2ee:"):
+            return group
+        chat_jid = thread_id.removeprefix("e2ee:")
+        key = chat_jid.split("@", 1)[0]
+        lookup_key = f"{account}:{key}"
+        now = asyncio.get_running_loop().time()
+        last = self._group_lookups.get(lookup_key)
+        if last is not None and now - last < NAME_RETRY_SECONDS:
+            return group
+        self._group_lookups[lookup_key] = now
+        self._group_lookups.move_to_end(lookup_key)
+        while len(self._group_lookups) > RECENT_MAX:
+            self._group_lookups.popitem(last=False)
+        try:
+            info = await BridgeActions(bridge).get_e2ee_group_info(chat_jid)  # type: ignore[arg-type]
+        except Exception as error:  # chưa nối E2EE, hết giờ, server từ chối
+            self.log(
+                "gateway",
+                f"Không tra được tên nhóm {key}: {type(error).__name__}",
+            )
+            return group
+        if isinstance(info, dict):
+            self._remember_thread(account, key, info.get("name"), None, "server E2EE")
+        return self.group_info(account, thread_id)
 
     def group_info(self, account: str, thread_id: str) -> dict[str, str]:
         """Tên/ảnh nhóm đã biết cho thread id của gateway (e2ee:<id>@g.us hoặc thread:<id>)."""
@@ -960,8 +1005,9 @@ class GatewayLink:
             },
         )
         raw = _raw(message)
-        group = self.group_info(account, thread_id) if is_group else {}
-        # Nhóm chưa biết tên: để trống, gateway đặt tên chung (không lấy tên người gửi).
+        group = await self._e2ee_group_info(account, bot, thread_id) if is_group else {}
+        # Nhóm chưa biết tên: để trống, gateway giữ tên đã biết hoặc đặt tên chung
+        # (không lấy tên người gửi).
         thread_name = raw.get("threadName") or (
             group.get("name", "") if is_group else sender_name
         )

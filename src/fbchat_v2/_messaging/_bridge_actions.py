@@ -302,6 +302,25 @@ class BridgeActions:
         return await self._call("getUserInfo", self._user_info_params(user_id))
 
     @staticmethod
+    def _group_info_params(chat_jid: str) -> dict[str, Any]:
+        if not isinstance(chat_jid, str) or not chat_jid.endswith("@g.us"):
+            raise ValueError("chat_jid phải là JID nhóm E2EE dạng <id>@g.us.")
+        return {"chatJid": chat_jid}
+
+    def get_e2ee_group_info_blocking(self, chat_jid: str) -> dict[str, Any]:
+        return self._call_blocking(
+            "getE2EEGroupInfo", self._group_info_params(chat_jid)
+        )
+
+    async def get_e2ee_group_info(self, chat_jid: str) -> dict[str, Any]:
+        """Tên nhóm E2EE (``name``) và số thành viên (``participantCount``).
+
+        Hỏi server qua socket E2EE đang mở; dùng khi bảng LightSpeed chưa nhắc
+        tới nhóm. Lỗi (chưa nối E2EE, nhóm không tồn tại) raise ``BridgeError``.
+        """
+        return await self._call("getE2EEGroupInfo", self._group_info_params(chat_jid))
+
+    @staticmethod
     def _download_e2ee_params(
         direct_path: str,
         media_key: str,

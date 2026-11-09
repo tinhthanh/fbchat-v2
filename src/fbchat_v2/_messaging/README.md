@@ -687,6 +687,15 @@ name, avatar = info["name"], info.get("profilePictureUrl", "")
 
 Không tìm thấy thì raise `BridgeError`; ID không phải số dương thì raise `ValueError`.
 
+Tin E2EE không mang tên nhóm. Tên nhóm E2EE hỏi server qua socket E2EE:
+
+```python
+info = await actions.get_e2ee_group_info("385860837219549@g.us")
+name, members = info["name"], info["participantCount"]
+```
+
+`chat_jid` không phải JID nhóm (`<id>@g.us`) thì raise `ValueError`.
+
 ---
 
 ## 🔐 Standalone E2EE sender

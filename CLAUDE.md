@@ -419,6 +419,7 @@ Public async methods:
 - `download_media`
 - `download_e2ee_media`
 - `get_user_info`
+- `get_e2ee_group_info`
 
 Mỗi async method có blocking counterpart rõ hậu tố. Binary bytes được base64 đúng tại RPC boundary, không sớm hơn.
 

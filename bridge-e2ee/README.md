@@ -315,8 +315,9 @@ sàng. Bridge không tự chuyển nội dung đó sang kết nối thường.
 | Method | Mục đích |
 |---|---|
 | `getUserInfo` | `{"userId": <số>}`: tên, ảnh (`profilePictureUrl`), `firstName`, `username` của một user từ danh bạ Messenger (task `GetContactsFull` qua socket đang mở, giới hạn 20 giây). Dùng được cả với người không phải bạn bè. Không tìm thấy thì lỗi `user not found` |
+| `getE2EEGroupInfo` | `{"chatJid": "<id>@g.us"}`: `name` và `participantCount` của nhóm E2EE, hỏi server qua socket E2EE đang mở (truy vấn mautrix-meta dùng, giới hạn 20 giây). Không có ID thành viên |
 
-Python chưa có hàm bọc công khai cho mọi Go RPC. `BridgeActions` hỗ trợ edit, unsend, typing, mark-read, ảnh/audio E2EE, tải media và tra danh bạ (`get_user_info`). Các RPC còn lại có thể cần thêm wrapper.
+Python chưa có hàm bọc công khai cho mọi Go RPC. `BridgeActions` hỗ trợ edit, unsend, typing, mark-read, ảnh/audio E2EE, tải media và tra danh bạ (`get_user_info`), tên nhóm E2EE (`get_e2ee_group_info`). Các RPC còn lại có thể cần thêm wrapper.
 
 ---
 

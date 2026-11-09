@@ -734,6 +734,62 @@ async def test_stranger_name_from_messenger_contacts(
 
 
 @pytest.mark.asyncio
+async def test_unknown_e2ee_group_name_asked_from_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 09/11/2026: sau khi fb-bot khởi động lại, nhóm của `default` mất tên vì
+    # bảng LightSpeed không nhắc lại nhóm đó; bot hỏi server qua bridge.
+    async def fake_user_info(
+        dataFB: dict[str, Any], user_id: str, **_: Any
+    ) -> dict[str, Any]:
+        return {"nameUser": "Đoàn Duy Nhất"}
+
+    class _GroupBridge(_FakeBridge):
+        def __init__(self) -> None:
+            super().__init__()
+            self.fail = True
+
+        async def call(
+            self,
+            method: str,
+            params: dict[str, Any] | None = None,
+            timeout: float = 60.0,
+        ) -> dict[str, Any]:
+            self.calls.append((method, params or {}))
+            if self.fail:
+                raise RuntimeError("timeout")
+            return {"name": "Nhóm VetGo", "participantCount": 4}
+
+    monkeypatch.setattr(gateway_link._get_user_info, "func", fake_user_info)
+    link, calls = _recording_link()
+    bot = _Bot()
+    bridge = _GroupBridge()
+    bot.listener._bridge = bridge  # type: ignore[attr-defined]
+
+    def message(n: int) -> dict[str, Any]:
+        return {
+            "messageID": f"m{n}",
+            "userID": "7",
+            "body": "hi",
+            "chatJid": "3858@g.us",
+        }
+
+    # Lỗi: vẫn chuyển tin, không tên; không hỏi lại ngay ở tin sau.
+    await link.forward("acc1", bot, message(1))
+    await link.forward("acc1", bot, message(2))
+    assert [c[1]["thread_name"] for c in calls] == ["", ""]
+    assert bridge.calls == [("getE2EEGroupInfo", {"chatJid": "3858@g.us"})]
+
+    # Hết giờ chờ: hỏi lại, lần này có tên và nhớ luôn.
+    link._group_lookups.clear()
+    bridge.fail = False
+    await link.forward("acc1", bot, message(3))
+    await link.forward("acc1", bot, message(4))
+    assert [c[1]["thread_name"] for c in calls[2:]] == ["Nhóm VetGo", "Nhóm VetGo"]
+    assert len(bridge.calls) == 2
+
+
+@pytest.mark.asyncio
 async def test_e2ee_group_name_and_picture_from_raw_tables(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

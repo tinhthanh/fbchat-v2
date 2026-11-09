@@ -599,6 +599,15 @@ name, avatar = info["name"], info.get("profilePictureUrl", "")
 
 Raises `BridgeError` when the user is not found and `ValueError` when the ID is not a positive number.
 
+E2EE messages carry no group name. Ask the server for an E2EE group's name over the E2EE socket:
+
+```python
+info = await actions.get_e2ee_group_info("385860837219549@g.us")
+name, members = info["name"], info["participantCount"]
+```
+
+Raises `ValueError` when `chat_jid` is not a group JID (`<id>@g.us`).
+
 ---
 
 ## 🔐 Standalone E2EE sender

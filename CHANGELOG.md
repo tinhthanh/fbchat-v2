@@ -22,6 +22,9 @@ phiên bản tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 - Sự kiện bridge `e2eeKeyCheck` sau mỗi `e2eeConnected`: so gói khoá server phát
   cho thiết bị bot với khoá bot giữ (chỉ cờ khớp/lệch); sự kiện `error` code 2 có
   thêm `encType` (`pkmsg`, `msg`, `skmsg`) và lý do `no_valid_session`.
+- RPC bridge `getE2EEGroupInfo` và `BridgeActions.get_e2ee_group_info()`: tên nhóm E2EE
+  từ server. fb-bot dùng khi bảng LightSpeed chưa nhắc tới nhóm (ví dụ vừa khởi
+  động lại), nên tin nhóm không còn mất tên.
 - RPC bridge `getUserInfo` và `BridgeActions.get_user_info()`: tên, ảnh của user từ
   danh bạ Messenger, cả người không phải bạn bè. fb-bot dùng khi `/chat/user_info`
   không trả hồ sơ, nên người lạ nhắn tới có tên và ảnh thay vì `Facebook <id>`.
