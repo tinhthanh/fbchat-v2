@@ -3,6 +3,7 @@ package bridge
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"go.mau.fi/mautrix-meta/pkg/messagix"
@@ -28,7 +29,9 @@ func stubReceiverFetch(t *testing.T, fn func(id string) (*messagix.ReceiverFetch
 		calls = append(calls, id)
 		return fn(id)
 	}
-	t.Cleanup(func() { fetchReceiverFetchMedia = orig })
+	origDelay := receiverFetchRetryDelay
+	receiverFetchRetryDelay = 0
+	t.Cleanup(func() { fetchReceiverFetchMedia, receiverFetchRetryDelay = orig, origDelay })
 	return &calls
 }
 
@@ -52,13 +55,40 @@ func TestE2EECatalogStickerResolvedToURL(t *testing.T) {
 }
 
 func TestE2EECatalogStickerFetchFailureKeepsPlaceholder(t *testing.T) {
-	stubReceiverFetch(t, func(string) (*messagix.ReceiverFetchMedia, error) { return nil, errors.New("boom") })
+	calls := stubReceiverFetch(t, func(string) (*messagix.ReceiverFetchMedia, error) {
+		return nil, errors.New("receiver fetch returned HTTP 401 https://www.facebook.com/api/graphql?access_token=secret\nbody")
+	})
 	c := &Client{Messagix: &messagix.Client{}}
 	att := c.extractE2EEStickerAttachment(stickerMessage(t, &waMediaTransport.StickerTransport{
 		Ancillary: &waMediaTransport.StickerTransport_Ancillary{ReceiverFetchID: proto.String("rf-2"), Width: proto.Uint32(120), Height: proto.Uint32(96)},
 	}))
 	if att.URL != "" || att.DirectPath != "" || att.Width != 120 || att.Height != 96 {
 		t.Fatalf("attachment %+v", att)
+	}
+	if len(*calls) != 2 {
+		t.Fatalf("want one retry, calls %v", *calls)
+	}
+	if !strings.HasPrefix(att.FetchError, "receiver fetch returned HTTP 401") ||
+		strings.Contains(att.FetchError, "secret") || strings.Contains(att.FetchError, "body") {
+		t.Fatalf("fetchError %q", att.FetchError)
+	}
+}
+
+func TestE2EECatalogStickerRetrySucceeds(t *testing.T) {
+	failed := false
+	calls := stubReceiverFetch(t, func(string) (*messagix.ReceiverFetchMedia, error) {
+		if !failed {
+			failed = true
+			return nil, errors.New("stale token")
+		}
+		return &messagix.ReceiverFetchMedia{URL: "https://scontent.xx.fbcdn.net/s.webp", MimeType: "image/webp"}, nil
+	})
+	c := &Client{Messagix: &messagix.Client{}}
+	att := c.extractE2EEStickerAttachment(stickerMessage(t, &waMediaTransport.StickerTransport{
+		Ancillary: &waMediaTransport.StickerTransport_Ancillary{ReceiverFetchID: proto.String("rf-3")},
+	}))
+	if len(*calls) != 2 || att.URL != "https://scontent.xx.fbcdn.net/s.webp" || att.FetchError != "" {
+		t.Fatalf("attachment %+v calls %v", att, *calls)
 	}
 }
 

@@ -108,6 +108,9 @@ type Attachment struct {
 	MediaSHA256    []byte `json:"mediaSha256,omitempty"`
 	MediaEncSHA256 []byte `json:"mediaEncSha256,omitempty"`
 	DirectPath     string `json:"directPath,omitempty"`
+	// FetchError says why the bridge could not resolve the media (a catalog
+	// sticker lookup); it carries no URL, token or cookie.
+	FetchError string `json:"fetchError,omitempty"`
 }
 
 // ReplyTo represents reply info
@@ -1790,13 +1793,27 @@ func (c *Client) extractE2EEStickerAttachment(sticker *waConsumerApplication.Con
 
 func (c *Client) resolveReceiverFetchSticker(att *Attachment, id string) {
 	if c.Messagix == nil {
+		att.FetchError = "no messagix client"
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), receiverFetchTimeout)
-	defer cancel()
-	media, err := fetchReceiverFetchMedia(ctx, c.Messagix, id)
+	var media *messagix.ReceiverFetchMedia
+	var err error
+	// One retry: a token or key that went stale since the last sticker is
+	// dropped after use, so a second lookup gets fresh ones.
+	for attempt := 0; attempt < 2; attempt++ {
+		if attempt > 0 {
+			time.Sleep(receiverFetchRetryDelay)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), receiverFetchTimeout)
+		media, err = fetchReceiverFetchMedia(ctx, c.Messagix, id)
+		cancel()
+		if err == nil {
+			break
+		}
+		c.Logger.Warn().Err(err).Int("attempt", attempt+1).Msg("Failed to resolve E2EE sticker media")
+	}
 	if err != nil {
-		c.Logger.Warn().Err(err).Msg("Failed to resolve E2EE sticker media")
+		att.FetchError = fetchErrorText(err)
 		return
 	}
 	att.URL = media.URL
@@ -1804,6 +1821,19 @@ func (c *Client) resolveReceiverFetchSticker(att *Attachment, id string) {
 	if media.Width > 0 && media.Height > 0 {
 		att.Width, att.Height = media.Width, media.Height
 	}
+}
+
+// receiverFetchRetryDelay is shortened in tests.
+var receiverFetchRetryDelay = 2 * time.Second
+
+// fetchErrorText keeps the first line of an error, redacted like the bridge
+// log and short enough for a log line.
+func fetchErrorText(err error) string {
+	text := redactLogString(strings.SplitN(err.Error(), "\n", 2)[0])
+	if len(text) > 160 {
+		text = text[:160]
+	}
+	return text
 }
 
 // extractURLFromLPHP extracts the actual URL from Facebook's l.php redirect URL

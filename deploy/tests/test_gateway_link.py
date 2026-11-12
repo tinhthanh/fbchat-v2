@@ -15,6 +15,7 @@ from gateway_link import (
     audio_seconds,
     GatewayLink,
     describe_attachment,
+    summarize,
     describe_message,
     fetch_attachment,
     media_rpc,
@@ -97,8 +98,21 @@ def test_describe_message_includes_attachments() -> None:
         "body": "xem ảnh",
         "attachments": [{"type": "image", "url": "https://x/y.jpg"}],
     }
-    assert describe_message(message) == "xem ảnh\n[image] https://x/y.jpg"
+    assert describe_message(message) == "xem ảnh\n🖼️ Ảnh\nhttps://x/y.jpg"
     assert describe_message({"body": "", "attachments": []}) == ""
+
+
+def test_media_labels_and_summary_without_urls() -> None:
+    video = {"type": "video", "fileName": "clip.mp4", "url": "https://cdn/v.mp4"}
+    assert describe_attachment(video) == "🎬 Video: clip.mp4\nhttps://cdn/v.mp4"
+    assert (
+        describe_attachment({"type": "file", "fileName": "FIP.pdf"})
+        == "📎 Tệp: FIP.pdf"
+    )
+    assert describe_attachment({"type": "voice"}) == "🎤 Tin thoại"
+    assert describe_attachment({"type": "poll"}) == "[poll]"
+    message = {"body": "", "attachments": [{"type": "image", "url": "https://x/y.jpg"}]}
+    assert summarize(message) == "🖼️ Ảnh"
 
 
 @pytest.mark.asyncio
@@ -424,6 +438,41 @@ async def test_forward_includes_downloaded_attachments(
     assert [a["name"] for a in sent[0]["attachments"]] == ["image.jpg"]
 
 
+@pytest.mark.asyncio
+async def test_forward_logs_sticker_fetch_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent: list[dict[str, Any]] = []
+    logs: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(json.loads(request.content))
+        return httpx.Response(200, json={})
+
+    async def fake_user_info(
+        dataFB: dict[str, Any], user_id: str, **_: Any
+    ) -> dict[str, Any]:
+        return {"nameUser": "Khách"}
+
+    monkeypatch.setattr(gateway_link._get_user_info, "func", fake_user_info)
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    link = GatewayLink(
+        "http://gateway:8080", TOKEN, client, lambda tag, msg: logs.append(msg)
+    )
+    message = {
+        "messageID": "m10",
+        "userID": "7",
+        "body": "",
+        "chatJid": "7@msgr",
+        "attachments": [
+            {"type": "sticker", "fetchError": "receiver fetch returned HTTP 401"}
+        ],
+    }
+    await link.forward("acc1", _Bot(), message)
+    assert sent[0]["text"] == "🧩 Sticker"
+    assert "Không lấy được sticker: receiver fetch returned HTTP 401" in logs
+
+
 def _recording_link() -> tuple[GatewayLink, list[tuple[str, dict[str, Any]]]]:
     calls: list[tuple[str, dict[str, Any]]] = []
 
@@ -456,7 +505,9 @@ def test_describe_attachment_location_link_sticker() -> None:
         "sourceText": "shop.vn",
     }
     assert describe_attachment(link) == "🔗 Áo thun\nhttps://shop.vn/a\nshop.vn"
-    assert describe_attachment({"type": "sticker"}) == "[Sticker]"
+    sticker = {"type": "sticker", "url": "https://cdn/s.png", "fileName": "s"}
+    assert describe_attachment({"type": "sticker"}) == "🧩 Sticker"
+    assert describe_attachment(sticker) == "🧩 Sticker"
 
 
 @pytest.mark.asyncio

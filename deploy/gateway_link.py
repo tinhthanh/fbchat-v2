@@ -56,6 +56,17 @@ UNDECRYPTABLE_TEXT = (
     " (tin có thể tự đến sau khi giải mã lại)"
 )
 OWNER = "Chủ tài khoản"
+# Nhãn cho file không tải được (lỗi, quá lớn, sticker không tra được URL) và
+# cho dòng tóm tắt tin (cảm xúc, trích dẫn), thay cho "[image] URL".
+MEDIA_LABELS = {
+    "image": "🖼️ Ảnh",
+    "gif": "🖼️ GIF",
+    "video": "🎬 Video",
+    "audio": "🎵 Âm thanh",
+    "voice": "🎤 Tin thoại",
+    "file": "📎 Tệp",
+    "sticker": "🧩 Sticker",
+}
 # mediaType cho downloadE2EEMedia (bridge nhận image/video/audio/voice/file/sticker).
 E2EE_MEDIA_TYPE = {"gif": "video"}
 # Dấu trong ghi chú cảm xúc thiếu thời điểm thả (canary tìm đúng chuỗi này).
@@ -212,7 +223,7 @@ def thread_ref(message: dict[str, Any]) -> tuple[str, bool] | None:
     return f"thread:{thread_id}", is_group
 
 
-def describe_attachment(attachment: dict[str, Any]) -> str:
+def describe_attachment(attachment: dict[str, Any], *, with_url: bool = True) -> str:
     """Chữ hiển thị cho attachment không tải được hoặc không có file (vị trí, link)."""
     kind = attachment.get("type") or "attachment"
     lat, lng = attachment.get("latitude"), attachment.get("longitude")
@@ -234,13 +245,19 @@ def describe_attachment(attachment: dict[str, Any]) -> str:
             str(v) for v in (attachment.get("url"), attachment.get("sourceText")) if v
         ]
         return "\n".join(lines)
-    if kind == "sticker":
-        return "[Sticker]"
-    detail = attachment.get("fileName") or attachment.get("url") or ""
-    return f"[{kind}] {detail}".strip()
+    label = MEDIA_LABELS.get(kind)
+    if label is None:
+        detail = attachment.get("fileName") or attachment.get("url") or ""
+        return f"[{kind}] {detail}".strip()
+    name = attachment.get("fileName")
+    if name and kind != "sticker":
+        label = f"{label}: {name}"
+    # Chat thường có URL CDN: nhân viên vẫn mở được khi bot không tải về.
+    url = attachment.get("url") if with_url and kind != "sticker" else None
+    return f"{label}\n{url}" if url else label
 
 
-def describe_message(message: dict[str, Any]) -> str:
+def describe_message(message: dict[str, Any], *, with_url: bool = True) -> str:
     """Nội dung chữ, kèm mô tả ngắn cho file đính kèm."""
     parts = []
     body = message.get("body")
@@ -248,7 +265,7 @@ def describe_message(message: dict[str, Any]) -> str:
         parts.append(body)
     for attachment in message.get("attachments") or []:
         if isinstance(attachment, dict):
-            parts.append(describe_attachment(attachment))
+            parts.append(describe_attachment(attachment, with_url=with_url))
     return "\n".join(parts)
 
 
@@ -398,7 +415,7 @@ def media_rpc(
 
 
 def summarize(message: dict[str, Any]) -> str:
-    text = " ".join(describe_message(message).split())
+    text = " ".join(describe_message(message, with_url=False).split())
     return text if len(text) <= 200 else text[:199] + "…"
 
 
@@ -971,6 +988,13 @@ class GatewayLink:
                     file = await fetch_attachment(bridge, attachment)
                 except Exception as error:  # bridge/mạng/dữ liệu: vẫn báo bằng chữ
                     self.log("gateway", f"Không tải được file đính kèm: {error}")
+                if file is None and attachment.get("fetchError"):
+                    # Bridge không tra được URL (sticker kho Messenger); lý do đã lọc bí mật.
+                    self.log(
+                        "gateway",
+                        f"Không lấy được {attachment.get('type') or 'file'}: "
+                        f"{str(attachment['fetchError'])[:160]}",
+                    )
             if file is not None:
                 files.append(file)
             else:

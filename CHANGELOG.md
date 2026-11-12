@@ -87,6 +87,11 @@ phiên bản tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
   `receiverFetchID`; bridge nay lấy URL ảnh qua `FetchReceiverFetchMedia` (như
   mautrix-meta) và điền `url`, `mimeType`, kích thước vào attachment, nên
   `downloadMedia` tải được thay vì chỉ có chữ `[Sticker]`.
+- Bridge: tra URL sticker kho Messenger thất bại thì thử lại một lần (token
+  hoặc khoá cũ đã bị bỏ sau lần dùng) và ghi lý do vào trường mới
+  `fetchError` của attachment (dòng đầu của lỗi, đã lọc như log bridge).
+  Trước đây lỗi chỉ ghi ra stderr, vốn bị tắt, nên sticker hỏng không để lại
+  dấu vết nào.
 - Test danh tính trình duyệt không còn hỏng CI khi job Python không có
   submodule `bridge-e2ee/meta`: job Go kiểm tra cùng điều kiện
   (`bridge-e2ee/identity_test.go`), test Python bỏ qua khi thiếu submodule.
