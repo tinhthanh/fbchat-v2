@@ -368,9 +368,34 @@ def audio_seconds(raw: bytes, mime: str) -> int:
                 return 0
             granule = int.from_bytes(raw[last + 6 : last + 14], "little")
             return max(1, -(-granule // 48000)) if granule > 0 else 0  # opus: 48 kHz
+        if len(raw) > 1 and raw[0] == 0xFF and raw[1] & 0xF6 == 0xF0:
+            return _adts_seconds(raw)
         return _mp4_seconds(raw, 0, len(raw))
     except (ValueError, IndexError):
         return 0
+
+
+ADTS_SAMPLE_RATES = (96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050)
+ADTS_SAMPLE_RATES += (16000, 12000, 11025, 8000, 7350)
+
+
+def _adts_seconds(raw: bytes) -> int:
+    """AAC thô (ADTS, vd. tin thoại Zalo .aac): mỗi frame 1024 mẫu. Thiếu số này
+    thì Messenger hiện tin thoại nhân viên gửi là 0:00 (omi 24/11/2026)."""
+    pos, samples, rate = 0, 0, 0
+    while pos + 7 <= len(raw) and raw[pos] == 0xFF and raw[pos + 1] & 0xF6 == 0xF0:
+        index = (raw[pos + 2] >> 2) & 0x0F
+        if index >= len(ADTS_SAMPLE_RATES):
+            return 0
+        rate = ADTS_SAMPLE_RATES[index]
+        length = (
+            ((raw[pos + 3] & 0x03) << 11) | (raw[pos + 4] << 3) | (raw[pos + 5] >> 5)
+        )
+        if length < 7:
+            return 0
+        samples += ((raw[pos + 6] & 0x03) + 1) * 1024
+        pos += length
+    return max(1, -(-samples // rate)) if rate and samples else 0
 
 
 def _mp4_seconds(raw: bytes, start: int, end: int) -> int:
