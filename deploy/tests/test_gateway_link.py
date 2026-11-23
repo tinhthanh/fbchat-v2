@@ -1462,6 +1462,33 @@ def test_audio_seconds_reads_mp4_and_ogg() -> None:
     )
 
 
+def _adts_frame(rate_index: int, payload: int = 10) -> bytes:
+    length = 7 + payload
+    header = bytes(
+        [
+            0xFF,
+            0xF1,  # MPEG-4, không CRC
+            (1 << 6) | (rate_index << 2),  # AAC LC
+            0x80 | (length >> 11),  # 2 kênh
+            (length >> 3) & 0xFF,
+            ((length & 0x07) << 5) | 0x1F,
+            0xFC,  # 1 khối dữ liệu mỗi frame
+        ]
+    )
+    return header + bytes(payload)
+
+
+def test_audio_seconds_reads_adts_aac() -> None:
+    # Tin thoại Zalo (.aac, ADTS) nhân viên gửi qua Facebook từng hiện 0:00.
+    frames_44k = _adts_frame(4) * 130  # 130 * 1024 / 44100 = 3,02 giây
+    assert audio_seconds(frames_44k, "audio/aac") == 4
+    assert audio_seconds(_adts_frame(11) * 16, "audio/aac") == 3  # 8 kHz: 2,05 giây
+    assert audio_seconds(_adts_frame(4)[:5], "audio/aac") == 0
+    bad_rate = bytearray(_adts_frame(4))
+    bad_rate[2] = (1 << 6) | (15 << 2)
+    assert audio_seconds(bytes(bad_rate), "audio/aac") == 0
+
+
 @pytest.mark.asyncio
 async def test_e2ee_reaction_without_sender_timestamp_is_flagged(
     monkeypatch: pytest.MonkeyPatch,
