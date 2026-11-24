@@ -533,6 +533,9 @@ def test_describe_attachment_location_link_sticker() -> None:
         describe_attachment(loc)
         == "📍 Vị trí: Quán\nhttps://maps.google.com/?q=10.77,106.7"
     )
+    # Vĩ độ 0 (ghim trên xích đạo) vẫn là toạ độ, không phải "thiếu toạ độ".
+    equator = {"type": "location", "latitude": 0, "longitude": 40.861588, "description": "Damajale, Kenya"}
+    assert describe_attachment(equator).endswith("?q=0,40.861588")
     link = {
         "type": "link",
         "url": "https://shop.vn/a",

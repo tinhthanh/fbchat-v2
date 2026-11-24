@@ -1,6 +1,8 @@
 package bridge
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"go.mau.fi/whatsmeow/proto/waArmadilloXMA"
@@ -25,7 +27,7 @@ func TestArmadilloLocationReadsPinnedLocation(t *testing.T) {
 	if att == nil {
 		t.Fatal("pinned location dropped")
 	}
-	if att.Type != "location" || att.Latitude != -0.153 || att.Longitude != 29.241 {
+	if att.Type != "location" || att.Latitude == nil || *att.Latitude != -0.153 || *att.Longitude != 29.241 {
 		t.Fatalf("att = %+v", att)
 	}
 	if att.Description != "Lubero, Cộng hoà dân chủ Congo" || att.FileName != "Vị trí đã ghim" {
@@ -52,5 +54,32 @@ func TestArmadilloLocationSkipsEventsWithoutCoordinates(t *testing.T) {
 	}
 	if att := armadilloLocation(&waArmadilloXMA.ExtendedContentMessage{}); att != nil {
 		t.Errorf("no CTA: got %+v", att)
+	}
+}
+
+// Ghim trên xích đạo (thử thật 24/11/2026: lat=0.000000): toạ độ 0 phải còn trong JSON gửi bot,
+// trước đây omitempty bỏ nó và Libredesk hiện "[location]" không có bản đồ.
+func TestLocationKeepsZeroCoordinatesInJSON(t *testing.T) {
+	att := armadilloLocation(locationXMA("messenger://location_share?lat=0.000000&long=40.861588", "Vị trí đã ghim", "Damajale, Kenya"))
+	if att == nil || *att.Latitude != 0 || *att.Longitude != 40.861588 {
+		t.Fatalf("att = %+v", att)
+	}
+	data, err := json.Marshal(att)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"latitude":0,`) || !strings.Contains(string(data), `"longitude":40.861588`) {
+		t.Fatalf("json = %s", data)
+	}
+	// Tệp đính kèm không phải vị trí: không có trường toạ độ.
+	data, _ = json.Marshal(&Attachment{Type: "image"})
+	if strings.Contains(string(data), "latitude") {
+		t.Fatalf("image json = %s", data)
+	}
+	if _, _, ok := parseCoordinates([]string{" 0 ", "0"}); !ok {
+		t.Fatal("0,0 rejected")
+	}
+	if _, _, ok := parseCoordinates([]string{"1"}); ok {
+		t.Fatal("one value accepted")
 	}
 }
