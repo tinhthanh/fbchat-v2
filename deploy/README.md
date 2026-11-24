@@ -126,7 +126,7 @@ Tên/ảnh của chính tài khoản lấy từ `/chat/user_info`; một số t�
 
 ### Tin giàu nội dung và sự kiện
 
-- Trích dẫn: tin E2EE chỉ có `replyTo.messageId`, nên bot nhớ 4096 tin gần nhất mỗi tài khoản (khoá `tài khoản:messageId`) để gửi `quote` = `Tên: nội dung`.
+- Trích dẫn: tin E2EE chỉ có `replyTo.messageId`, nên bot nhớ 4096 tin gần nhất mỗi tài khoản (khoá `tài khoản:messageId`) để gửi `quote` = `Tên: nội dung`. Bộ nhớ này ghi xuống `/data/quotes.json` (quyền `0600`, ghi atomic, gom thay đổi trong 2 giây) nên khởi động lại vẫn trích dẫn được tin cũ; tệp có tóm tắt tin (tối đa 200 ký tự) và tên người gửi, gỡ tài khoản thì tin của nó bị xoá khỏi tệp.
 - Sticker tải về như ảnh (thiếu MIME thì bot đoán theo đầu tệp: PNG, JPEG, GIF, WebP, PDF, nên không còn `sticker.bin`); nút Like 👍 thành chữ 👍; vị trí thành link Google Maps; link kèm mô tả.
 - Avatar: chat 1-1 gửi `thread_avatar` = `thumbSrc` của người nhắn (cùng lần tra tên); nhóm gửi `sender_avatar` của từng người để giao diện hiện avatar thành viên.
 - Nhóm: chat E2EE có JID `<id>@g.us` là nhóm. Tin E2EE không mang tên nhóm, nên bot đọc tên/ảnh nhóm từ bảng LightSpeed trong sự kiện `raw` (`LSDeleteThenInsertThread`, `LSSyncUpdateThreadName`, `LSSetThreadImageURL`). Bảng này chỉ nhắc nhóm khi Messenger đồng bộ đúng nhóm đó, và bot quên khi khởi động lại, nên nhóm E2EE chưa biết tên thì bot hỏi server qua bridge (`get_e2ee_group_info`, mỗi nhóm tối đa một lần mỗi giờ). Vẫn chưa biết thì gửi tên trống: gateway giữ tên nhóm đã biết, hoặc đặt `👥 Nhóm Facebook` nếu chưa từng biết (không bao giờ lấy tên người gửi).
