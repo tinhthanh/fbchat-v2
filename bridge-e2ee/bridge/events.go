@@ -1542,8 +1542,15 @@ func (c *Client) extractE2EEMessage(e *events.FBMessage, senderID int64) *E2EEMe
 			if extMsg := content.GetExtendedContentMessage(); extMsg != nil {
 				targetType := extMsg.GetTargetType()
 				if targetType == waArmadilloXMA.ExtendedContentMessage_MSG_LOCATION_SHARING_V2 {
-					// Todo: check for live location end event?
-					return nil
+					// Vị trí ghim (hay vị trí hiện tại) mang toạ độ trong CTA messenger://location_share,
+					// như mautrix-meta đọc (msgconv waLocationMessageToMatrix). Không có toạ độ (sự kiện
+					// vị trí trực tiếp) thì bỏ như trước. Trước 24/11/2026 mọi tin loại này bị bỏ.
+					att := armadilloLocation(extMsg)
+					if att == nil {
+						return nil
+					}
+					msg.Attachments = append(msg.Attachments, att)
+					return msg
 				}
 
 				att := c.extractArmadilloLinkAttachment(extMsg)
@@ -1566,6 +1573,34 @@ func (c *Client) extractE2EEMessage(e *events.FBMessage, senderID int64) *E2EEMe
 	}
 
 	return msg
+}
+
+// armadilloLocation: tệp đính kèm location từ XMA chia sẻ vị trí (CTA
+// messenger://location_share?lat=..&long=..); nil nếu không có toạ độ hợp lệ.
+func armadilloLocation(extMsg *waArmadilloXMA.ExtendedContentMessage) *Attachment {
+	for _, cta := range extMsg.GetCtas() {
+		u, err := url.Parse(cta.GetNativeURL())
+		if err != nil || u.Scheme != "messenger" || u.Host != "location_share" {
+			continue
+		}
+		lat, errLat := strconv.ParseFloat(u.Query().Get("lat"), 64)
+		lng, errLng := strconv.ParseFloat(u.Query().Get("long"), 64)
+		if errLat != nil || errLng != nil || lat < -90 || lat > 90 || lng < -180 || lng > 180 {
+			continue
+		}
+		label := strings.TrimSpace(extMsg.GetSubtitleText())
+		if label == "" {
+			label = strings.TrimSpace(extMsg.GetTitleText())
+		}
+		return &Attachment{
+			Type:        "location",
+			Latitude:    lat,
+			Longitude:   lng,
+			FileName:    strings.TrimSpace(extMsg.GetTitleText()),
+			Description: label,
+		}
+	}
+	return nil
 }
 
 // extractArmadilloLinkAttachment extracts link attachment from Armadillo ExtendedContentMessage
