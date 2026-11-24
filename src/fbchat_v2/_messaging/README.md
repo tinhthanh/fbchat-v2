@@ -625,6 +625,8 @@ await actions.send_e2ee_typing(
     "100012345678@msgr",
     True,
 )
+# Biên nhận "đã xem" E2EE; nhóm (@g.us) cần thêm sender_jid của người gửi tin.
+await actions.mark_e2ee_read("100012345678@msgr", ["mid.abc"])
 ```
 
 ### E2EE image và audio

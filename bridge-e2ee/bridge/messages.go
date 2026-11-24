@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -418,6 +419,56 @@ func (c *Client) sendE2EETyping(e2eeClient e2eeTypingSender, chatJIDStr string, 
 	ctx, cancel := context.WithTimeout(c.ctx, e2eeTypingTimeout)
 	defer cancel()
 	return e2eeClient.SendChatPresence(ctx, chatJID, presence, waTypes.ChatPresenceMediaText)
+}
+
+// MarkE2EERead sends a read receipt for messages in an E2EE chat, what the Messenger app
+// sends when the user opens the chat. senderJID may be empty in 1:1 chats; groups need the
+// author of the messages.
+func (c *Client) MarkE2EERead(chatJIDStr, senderJIDStr string, messageIDs []string) error {
+	e2eeClient := c.snapshotE2EEClient()
+	if e2eeClient == nil {
+		return ErrE2EENotConnected
+	}
+	return c.markE2EERead(e2eeClient, chatJIDStr, senderJIDStr, messageIDs)
+}
+
+type e2eeReadMarker interface {
+	e2eeConnectionState
+	MarkRead(context.Context, []waTypes.MessageID, time.Time, waTypes.JID, waTypes.JID, ...waTypes.ReceiptType) error
+}
+
+// errNoMessageIDs: markE2EERead needs at least one message ID (whatsmeow rejects an empty list too).
+var errNoMessageIDs = errors.New("no message IDs specified")
+
+func (c *Client) markE2EERead(e2eeClient e2eeReadMarker, chatJIDStr, senderJIDStr string, messageIDs []string) error {
+	if err := c.lifecycleError(); err != nil {
+		return err
+	}
+	if !isE2EEReady(e2eeClient) {
+		return ErrE2EENotConnected
+	}
+	ids := make([]waTypes.MessageID, 0, len(messageIDs))
+	for _, id := range messageIDs {
+		if id != "" {
+			ids = append(ids, waTypes.MessageID(id))
+		}
+	}
+	if len(ids) == 0 {
+		return errNoMessageIDs
+	}
+	chatJID, err := parseJID(chatJIDStr)
+	if err != nil {
+		return err
+	}
+	senderJID := waTypes.EmptyJID
+	if senderJIDStr != "" {
+		if senderJID, err = parseJID(senderJIDStr); err != nil {
+			return err
+		}
+	}
+	ctx, cancel := context.WithTimeout(c.ctx, e2eeTypingTimeout)
+	defer cancel()
+	return e2eeClient.MarkRead(ctx, ids, time.Now(), chatJID, senderJID)
 }
 
 // EditE2EEMessage edits an E2EE message

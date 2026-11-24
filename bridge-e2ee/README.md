@@ -302,6 +302,7 @@ sàng. Bridge không tự chuyển nội dung đó sang kết nối thường.
 | `sendTypingIndicator` | Typing thường |
 | `markRead` | Mark read thường |
 | `sendE2EETyping` | Typing E2EE |
+| `markE2EERead` | Biên nhận "đã xem" E2EE: `chatJid`, `messageIds`, `senderJid` (bắt buộc trong nhóm, trống ở chat 1-1) |
 
 ### Media download
 

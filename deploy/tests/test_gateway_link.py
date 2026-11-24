@@ -1459,6 +1459,50 @@ async def test_agent_reaction_goes_through_the_bridge(
     )[0] == 404
 
 
+
+@pytest.mark.asyncio
+async def test_read_marks_the_latest_customer_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """POST /read (canary "Đã xem"): tin gần nhất của khách, bỏ qua tin chủ tài khoản."""
+    monkeypatch.setattr(gateway_link._get_user_info, "func", _names)
+    link, _ = _recording_link()
+    bot = _Bot()
+    link.bots["acc1"] = bot
+    for mid in ("m1", "m2"):
+        await link.forward(
+            "acc1",
+            bot,
+            {"messageID": mid, "userID": "7", "body": mid, "chatJid": "7@msgr"},
+        )
+    await link.forward_owner(
+        "acc1",
+        bot,
+        {"messageID": "o1", "userID": "100", "body": "chủ", "chatJid": "7@msgr"},
+    )
+    bridge = bot.listener._bridge
+    status, text = await link.read({"account": "acc1", "thread_id": "e2ee:7@msgr"})
+    assert status == 200 and json.loads(text)["message_id"] == "m2"
+    assert bridge.calls[-1] == (
+        "markE2EERead",
+        {"chatJid": "7@msgr", "senderJid": "", "messageIds": ["m2"]},
+    )
+    status, _ = await link.read(
+        {"account": "acc1", "thread_id": "thread:55", "message_id": "x9"}
+    )
+    assert status == 200
+    assert bridge.calls[-1] == ("markRead", {"threadId": 55, "watermarkTs": 0})
+    # Chưa có tin nào của khách trong chat: 409, không gọi bridge.
+    calls = len(bridge.calls)
+    assert (await link.read({"account": "acc1", "thread_id": "e2ee:8@msgr"}))[
+        0
+    ] == 409
+    assert (await link.read({"account": "acc1", "thread_id": "x"}))[0] == 400
+    assert (await link.read({"account": "nope", "thread_id": "e2ee:7@msgr"}))[
+        0
+    ] == 404
+    assert len(bridge.calls) == calls
+
 def _box(kind: bytes, body: bytes) -> bytes:
     return (8 + len(body)).to_bytes(4, "big") + kind + body
 

@@ -48,3 +48,29 @@ async def test_get_e2ee_group_info_requires_group_jid() -> None:
     ]
     with pytest.raises(ValueError):
         await actions.get_e2ee_group_info("42@msgr")
+
+
+@pytest.mark.asyncio
+async def test_mark_e2ee_read_sends_receipt_params() -> None:
+    bridge = _Bridge()
+    actions = BridgeActions(bridge)  # type: ignore[arg-type]
+    await actions.mark_e2ee_read("42", ["m1", "", "m2"])
+    actions.mark_e2ee_read_blocking("385@g.us", ["m3"], sender_jid="7")
+    assert bridge.calls == [
+        (
+            "markE2EERead",
+            {"chatJid": "42@msgr", "senderJid": "", "messageIds": ["m1", "m2"]},
+        ),
+        (
+            "markE2EERead",
+            {"chatJid": "385@g.us", "senderJid": "7@msgr", "messageIds": ["m3"]},
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_mark_e2ee_read_needs_a_message_id() -> None:
+    bridge = _Bridge()
+    with pytest.raises(ValueError):
+        await BridgeActions(bridge).mark_e2ee_read("42@msgr", ["", ""])  # type: ignore[arg-type]
+    assert bridge.calls == []

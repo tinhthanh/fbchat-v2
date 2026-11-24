@@ -757,6 +757,7 @@ Public async actions:
 | `send_typing_indicator(thread_id, is_typing, ...)` | Typing thường |
 | `mark_read(thread_id, watermark_ts)` | Đánh dấu đã đọc |
 | `send_e2ee_typing(chat_jid, is_typing)` | Typing E2EE |
+| `mark_e2ee_read(chat_jid, message_ids, sender_jid="")` | Biên nhận "đã xem" E2EE (`sender_jid` cần trong nhóm) |
 | `send_e2ee_audio(chat_jid, data, ...)` | Gửi audio bytes |
 | `send_e2ee_image(chat_jid, data, ...)` | Gửi image bytes |
 | `download_media(url)` | Download media thường thành bytes |

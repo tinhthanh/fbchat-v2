@@ -416,6 +416,7 @@ Public async methods:
 - `send_typing_indicator`
 - `mark_read`
 - `send_e2ee_typing`
+- `mark_e2ee_read`
 - `send_e2ee_audio`
 - `send_e2ee_image`
 - `download_media`

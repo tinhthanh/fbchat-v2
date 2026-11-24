@@ -159,6 +159,81 @@ func TestE2EETypingRejectsCanceledLifecycleAndInvalidJID(t *testing.T) {
 	}
 }
 
+type fakeE2EEReadMarker struct {
+	fakeE2EEConnectionState
+	mark func(context.Context, []waTypes.MessageID, time.Time, waTypes.JID, waTypes.JID) error
+}
+
+func (marker *fakeE2EEReadMarker) MarkRead(ctx context.Context, ids []waTypes.MessageID, ts time.Time, chat, sender waTypes.JID, _ ...waTypes.ReceiptType) error {
+	return marker.mark(ctx, ids, ts, chat, sender)
+}
+
+func TestE2EEMarkReadSendsReceiptForGivenMessages(t *testing.T) {
+	client := &Client{ctx: context.Background()}
+	called := 0
+	marker := &fakeE2EEReadMarker{
+		fakeE2EEConnectionState: fakeE2EEConnectionState{connected: true, loggedIn: true},
+		mark: func(ctx context.Context, ids []waTypes.MessageID, ts time.Time, chat, sender waTypes.JID) error {
+			called++
+			if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > e2eeTypingTimeout {
+				t.Fatalf("receipt deadline = %v", deadline)
+			}
+			if len(ids) != 2 || ids[0] != "m1" || ids[1] != "m2" {
+				t.Fatalf("ids = %v (empty ids must be dropped)", ids)
+			}
+			if chat.String() != "12345@msgr" {
+				t.Fatalf("chat = %q", chat)
+			}
+			if called == 1 && !sender.IsEmpty() {
+				t.Fatalf("1:1 receipt sender = %q, want empty", sender)
+			}
+			if called == 2 && sender.String() != "777@msgr" {
+				t.Fatalf("group receipt sender = %q", sender)
+			}
+			if time.Since(ts) > time.Minute {
+				t.Fatalf("timestamp %v is not now", ts)
+			}
+			return nil
+		},
+	}
+	if err := client.markE2EERead(marker, "12345@msgr", "", []string{"m1", "", "m2"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.markE2EERead(marker, "12345@msgr", "777@msgr", []string{"m1", "m2"}); err != nil {
+		t.Fatal(err)
+	}
+	if called != 2 {
+		t.Fatalf("MarkRead called %d times", called)
+	}
+}
+
+func TestE2EEMarkReadRejectsBadRequestsWithoutSending(t *testing.T) {
+	if err := (&Client{}).MarkE2EERead("12345@msgr", "", []string{"m1"}); !errors.Is(err, ErrE2EENotConnected) {
+		t.Fatalf("MarkE2EERead() without E2EE error = %v", err)
+	}
+	marker := &fakeE2EEReadMarker{
+		fakeE2EEConnectionState: fakeE2EEConnectionState{connected: true, loggedIn: true},
+		mark: func(context.Context, []waTypes.MessageID, time.Time, waTypes.JID, waTypes.JID) error {
+			t.Fatal("bad receipt request reached transport")
+			return nil
+		},
+	}
+	client := &Client{ctx: context.Background()}
+	if err := client.markE2EERead(marker, "12345@msgr", "", []string{"", ""}); !errors.Is(err, errNoMessageIDs) {
+		t.Fatalf("empty ids error = %v", err)
+	}
+	if err := client.markE2EERead(marker, "invalid:jid:device@msgr", "", []string{"m1"}); err == nil {
+		t.Fatal("accepted an invalid chat JID")
+	}
+	if err := client.markE2EERead(marker, "12345@msgr", "invalid:jid:device@msgr", []string{"m1"}); err == nil {
+		t.Fatal("accepted an invalid sender JID")
+	}
+	unready := &fakeE2EEReadMarker{mark: marker.mark}
+	if err := client.markE2EERead(unready, "12345@msgr", "", []string{"m1"}); !errors.Is(err, ErrE2EENotConnected) {
+		t.Fatalf("unready error = %v", err)
+	}
+}
+
 func TestBuildE2EEReactionHasSenderTimestamp(t *testing.T) {
 	key := &waCommon.MessageKey{ID: proto.String("mid-1")}
 	msg := buildE2EEReaction(key, "❤", 1793600000123)
