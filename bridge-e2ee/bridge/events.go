@@ -89,20 +89,22 @@ type Thread struct {
 
 // Attachment represents a media attachment
 type Attachment struct {
-	Type        string  `json:"type"` // "image", "video", "audio", "file", "sticker", "gif", "voice", "location", "link"
-	URL         string  `json:"url,omitempty"`
-	FileName    string  `json:"fileName,omitempty"`
-	MimeType    string  `json:"mimeType,omitempty"`
-	FileSize    int64   `json:"fileSize,omitempty"`
-	Width       int     `json:"width,omitempty"`
-	Height      int     `json:"height,omitempty"`
-	Duration    int     `json:"duration,omitempty"` // in seconds for audio/video
-	StickerID   int64   `json:"stickerId,omitempty"`
-	Latitude    float64 `json:"latitude,omitempty"`
-	Longitude   float64 `json:"longitude,omitempty"`
-	PreviewURL  string  `json:"previewUrl,omitempty"`
-	Description string  `json:"description,omitempty"` // For link attachments
-	SourceText  string  `json:"sourceText,omitempty"`  // Domain/source for link attachments
+	Type      string `json:"type"` // "image", "video", "audio", "file", "sticker", "gif", "voice", "location", "link"
+	URL       string `json:"url,omitempty"`
+	FileName  string `json:"fileName,omitempty"`
+	MimeType  string `json:"mimeType,omitempty"`
+	FileSize  int64  `json:"fileSize,omitempty"`
+	Width     int    `json:"width,omitempty"`
+	Height    int    `json:"height,omitempty"`
+	Duration  int    `json:"duration,omitempty"` // in seconds for audio/video
+	StickerID int64  `json:"stickerId,omitempty"`
+	// Con trỏ: toạ độ 0 (xích đạo, kinh tuyến gốc) vẫn có trong JSON; float64 + omitempty
+	// làm mất nó và bot coi như vị trí không có toạ độ (thử thật 24/11/2026, vị trí ghim lat=0).
+	Latitude    *float64 `json:"latitude,omitempty"`
+	Longitude   *float64 `json:"longitude,omitempty"`
+	PreviewURL  string   `json:"previewUrl,omitempty"`
+	Description string   `json:"description,omitempty"` // For link attachments
+	SourceText  string   `json:"sourceText,omitempty"`  // Domain/source for link attachments
 	// For E2EE media download
 	MediaKey       []byte `json:"mediaKey,omitempty"`
 	MediaSHA256    []byte `json:"mediaSha256,omitempty"`
@@ -782,13 +784,11 @@ func (c *Client) convertWrappedMessage(msg *table.WrappedMessage) *Message {
 			// Parse location from NativeUrl (format: "lat,lng")
 			if xma.CTA.NativeUrl != "" {
 				parts := strings.Split(xma.CTA.NativeUrl, ",")
-				if len(parts) == 2 {
-					lat, _ := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
-					lng, _ := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+				if lat, lng, ok := parseCoordinates(parts); ok {
 					m.Attachments = append(m.Attachments, &Attachment{
 						Type:        "location",
-						Latitude:    lat,
-						Longitude:   lng,
+						Latitude:    &lat,
+						Longitude:   &lng,
 						FileName:    xma.TitleText,    // Address name
 						Description: xma.SubtitleText, // Address details
 					})
@@ -1461,10 +1461,12 @@ func (c *Client) extractE2EEMessage(e *events.FBMessage, senderID int64) *E2EEMe
 
 				// Check for location
 				if loc, ok := content.GetContent().(*waConsumerApplication.ConsumerApplication_Content_LocationMessage); ok {
+					lat := loc.LocationMessage.GetLocation().GetDegreesLatitude()
+					lng := loc.LocationMessage.GetLocation().GetDegreesLongitude()
 					att := &Attachment{
 						Type:      "location",
-						Latitude:  loc.LocationMessage.GetLocation().GetDegreesLatitude(),
-						Longitude: loc.LocationMessage.GetLocation().GetDegreesLongitude(),
+						Latitude:  &lat,
+						Longitude: &lng,
 						FileName:  loc.LocationMessage.GetAddress(),
 					}
 					msg.Attachments = append(msg.Attachments, att)
@@ -1575,6 +1577,20 @@ func (c *Client) extractE2EEMessage(e *events.FBMessage, senderID int64) *E2EEMe
 	return msg
 }
 
+// parseCoordinates đọc [vĩ độ, kinh độ]; ok=false khi thiếu, sai định dạng hay ngoài phạm vi.
+// Toạ độ 0 là hợp lệ (xích đạo, kinh tuyến gốc).
+func parseCoordinates(parts []string) (lat, lng float64, ok bool) {
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+	lat, errLat := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+	lng, errLng := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+	if errLat != nil || errLng != nil || lat < -90 || lat > 90 || lng < -180 || lng > 180 {
+		return 0, 0, false
+	}
+	return lat, lng, true
+}
+
 // armadilloLocation: tệp đính kèm location từ XMA chia sẻ vị trí (CTA
 // messenger://location_share?lat=..&long=..); nil nếu không có toạ độ hợp lệ.
 func armadilloLocation(extMsg *waArmadilloXMA.ExtendedContentMessage) *Attachment {
@@ -1583,9 +1599,8 @@ func armadilloLocation(extMsg *waArmadilloXMA.ExtendedContentMessage) *Attachmen
 		if err != nil || u.Scheme != "messenger" || u.Host != "location_share" {
 			continue
 		}
-		lat, errLat := strconv.ParseFloat(u.Query().Get("lat"), 64)
-		lng, errLng := strconv.ParseFloat(u.Query().Get("long"), 64)
-		if errLat != nil || errLng != nil || lat < -90 || lat > 90 || lng < -180 || lng > 180 {
+		lat, lng, ok := parseCoordinates([]string{u.Query().Get("lat"), u.Query().Get("long")})
+		if !ok {
 			continue
 		}
 		label := strings.TrimSpace(extMsg.GetSubtitleText())
@@ -1594,8 +1609,8 @@ func armadilloLocation(extMsg *waArmadilloXMA.ExtendedContentMessage) *Attachmen
 		}
 		return &Attachment{
 			Type:        "location",
-			Latitude:    lat,
-			Longitude:   lng,
+			Latitude:    &lat,
+			Longitude:   &lng,
 			FileName:    strings.TrimSpace(extMsg.GetTitleText()),
 			Description: label,
 		}
