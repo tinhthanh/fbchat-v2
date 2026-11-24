@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -1611,3 +1612,95 @@ def test_forget_account_drops_only_that_accounts_memory() -> None:
         assert any(k.startswith("shop1:") for k in cache)
     assert [p["account"] for p in link._pending] == ["shop1"]
     assert "acc2" not in link.bots
+
+
+@pytest.mark.asyncio
+async def test_quote_memory_survives_a_restart(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Bộ nhớ trích dẫn ghi xuống volume: sau khi bot khởi động lại, trích dẫn tới tin cũ
+    vẫn có nội dung (trước đây "không còn trong bộ nhớ của bot", thử thật 24/11/2026)."""
+    monkeypatch.setattr(gateway_link._get_user_info, "func", _names)
+    monkeypatch.setattr(gateway_link, "RECENT_STORE_DELAY", 0.01)
+    store = tmp_path / "data" / "quotes.json"
+    link, _ = _recording_link()
+    link.load_recent(store)  # chưa có tệp: không lỗi
+    bot = _Bot()
+    for mid, body in (("m1", "mèo nôn"), ("m2", "chó ho")):
+        await link.forward(
+            "acc1", bot, {"messageID": mid, "userID": "7", "body": body, "chatJid": "7@msgr"}
+        )
+    await link.forward(
+        "acc2", bot, {"messageID": "x1", "userID": "8", "body": "khác", "chatJid": "8@msgr"}
+    )
+    await asyncio.sleep(0.05)
+    assert store.exists() and (store.stat().st_mode & 0o777) == 0o600
+    assert list(tmp_path.joinpath("data").glob("*.tmp")) == []
+
+    restarted, calls = _recording_link()
+    restarted.load_recent(store)
+    await restarted.forward(
+        "acc1",
+        bot,
+        {
+            "messageID": "m3",
+            "userID": "7",
+            "body": "trả lời",
+            "chatJid": "7@msgr",
+            "raw": {"replyTo": {"messageId": "m1"}},
+        },
+    )
+    assert calls[-1][1]["quote"] == "User 7: mèo nôn"
+
+    # Gỡ tài khoản: tin của nó rời khỏi tệp, tài khoản khác giữ nguyên.
+    restarted.forget_account("acc2")
+    await asyncio.sleep(0.05)
+    saved = json.loads(store.read_text(encoding="utf-8"))
+    keys = [k for k, _ in saved["recent"]]
+    assert "acc1:m1" in keys and not any(k.startswith("acc2:") for k in keys)
+
+
+def test_quote_memory_ignores_a_broken_file(tmp_path: Path) -> None:
+    store = tmp_path / "quotes.json"
+    link, _ = _recording_link()
+    store.write_text("{không phải json", encoding="utf-8")
+    link.load_recent(store)
+    assert len(link._recent) == 0
+    store.write_text(
+        json.dumps(
+            {
+                "recent": [
+                    ["acc1:m1", {"summary": "ok", "sender": "A", "junk": [1], "is_group": False}],
+                    ["acc1:m2", "không phải dict"],
+                    ["thiếu"],
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    link.load_recent(store)
+    assert dict(link._recent) == {
+        "acc1:m1": {"summary": "ok", "sender": "A", "is_group": False}
+    }
+
+
+@pytest.mark.asyncio
+async def test_quote_memory_batches_writes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(gateway_link, "RECENT_STORE_DELAY", 0.05)
+    link, _ = _recording_link()
+    link.load_recent(tmp_path / "quotes.json")
+    writes = 0
+    real = link.save_recent
+
+    def counting() -> None:
+        nonlocal writes
+        writes += 1
+        real()
+
+    monkeypatch.setattr(link, "save_recent", counting)
+    for i in range(20):
+        link._remember("acc1", f"m{i}", {"summary": str(i), "thread_id": "e2ee:7@msgr"})
+    await asyncio.sleep(0.1)
+    assert writes == 1

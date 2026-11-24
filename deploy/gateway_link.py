@@ -19,9 +19,12 @@ import hmac
 import json
 import os
 import re
+import tempfile
 import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
+from pathlib import Path
 from typing import Any, Protocol
 
 import httpx
@@ -35,6 +38,10 @@ ONE_TO_ONE_THREAD_TYPES = frozenset({1, 7, 10, 13, 14, 15})
 MAX_REQUEST_BYTES = 96 << 20  # base64 của vài file 20 MiB
 MAX_FILE_BYTES = int(os.environ.get("GATEWAY_MAX_FILE_MB", "20")) << 20
 RECENT_MAX = 4096
+# Bộ nhớ trích dẫn (_recent) ghi xuống volume của bot, gom các thay đổi trong chừng này giây:
+# trước đây chỉ ở RAM, khởi động lại (deploy) thì trích dẫn tới tin cũ thành "không còn trong bộ nhớ".
+RECENT_STORE_DELAY = 2.0
+RECENT_FIELDS = ("summary", "sender", "thread_id", "is_group", "sender_jid")
 NAME_RETRY_SECONDS = 3600.0
 MEDIA_RPC_TIMEOUT = 180.0
 # Loại attachment của bridge có nội dung tải được; sticker/location/link chỉ mô tả.
@@ -498,6 +505,8 @@ class GatewayLink:
         # messageId -> {summary, sender, thread_id, is_group}: cho trích dẫn E2EE
         # (chỉ có messageId), sửa tin (threadId=0), thu hồi và reaction.
         self._recent: OrderedDict[str, dict[str, Any]] = OrderedDict()
+        self._recent_path: Path | None = None  # load_recent: tệp trên volume, None thì chỉ RAM
+        self._recent_save: asyncio.TimerHandle | None = None
         self._bot_sent: OrderedDict[str, None] = OrderedDict()
         self._pending: list[dict[str, Any]] = []
         # "tài khoản:threadKey" -> {"name", "picture"}: tên/ảnh nhóm đọc từ bảng
@@ -558,6 +567,61 @@ class GatewayLink:
         if self.bots.get(account) is bot:
             del self.bots[account]
 
+    def load_recent(self, path: Path) -> None:
+        """Nạp bộ nhớ trích dẫn đã lưu và ghi tiếp vào path (0600, ghi atomic). Tệp hỏng thì bỏ qua."""
+        self._recent_path = path
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return
+        except (OSError, ValueError) as error:
+            self.log("gateway", f"Bỏ qua bộ nhớ trích dẫn không đọc được: {error}")
+            return
+        rows = raw.get("recent") if isinstance(raw, dict) else None
+        for row in rows[-RECENT_MAX:] if isinstance(rows, list) else []:
+            if not (
+                isinstance(row, list)
+                and len(row) == 2
+                and isinstance(row[0], str)
+                and isinstance(row[1], dict)
+            ):
+                continue
+            self._recent[row[0]] = {
+                k: v
+                for k, v in row[1].items()
+                if k in RECENT_FIELDS and isinstance(v, (str, bool))
+            }
+
+    def _schedule_recent_save(self) -> None:
+        if self._recent_path is None or self._recent_save is not None:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self.save_recent()
+            return
+        self._recent_save = loop.call_later(RECENT_STORE_DELAY, self.save_recent)
+
+    def save_recent(self) -> None:
+        self._recent_save = None
+        path = self._recent_path
+        if path is None:
+            return
+        data = {"version": 1, "recent": [[k, v] for k, v in self._recent.items()]}
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")  # quyền 0600
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                    json.dump(data, handle, ensure_ascii=False)
+                os.replace(tmp, path)
+            except BaseException:
+                with suppress(OSError):
+                    os.unlink(tmp)
+                raise
+        except OSError as error:
+            self.log("gateway", f"Không lưu được bộ nhớ trích dẫn: {error}")
+
     def forget_account(self, account: str) -> None:
         """Quên mọi thứ đã nhớ về một tài khoản vừa gỡ (tin, nhóm, thành viên, tin chờ echo)."""
         self.bots.pop(account, None)
@@ -574,6 +638,7 @@ class GatewayLink:
             for key in [k for k in cache if k.startswith(prefix)]:
                 del cache[key]
         self._pending = [p for p in self._pending if p.get("account") != account]
+        self._schedule_recent_save()  # tin của tài khoản đã gỡ cũng rời khỏi tệp
 
     def observe_raw(
         self, account: str, event: dict[str, Any]
@@ -851,6 +916,7 @@ class GatewayLink:
         self._recent.move_to_end(key)
         while len(self._recent) > RECENT_MAX:
             self._recent.popitem(last=False)
+        self._schedule_recent_save()
 
     def _mark_bot_sent(self, message_id: Any) -> None:
         if message_id:
@@ -1011,6 +1077,7 @@ class GatewayLink:
             # Bot vừa sửa theo yêu cầu nhân viên: gateway đã ghi chú. Chỉ cập nhật
             # nội dung đã nhớ (cho trích dẫn/thu hồi sau này).
             cached["summary"] = str(data.get("newText") or "")
+            self._schedule_recent_save()
             return
         elif kind == "messageEdit":
             if not cached.get("thread_id"):
@@ -1018,6 +1085,7 @@ class GatewayLink:
             new_text = str(data.get("newText") or "")
             text = f"«{cached.get('summary', '')}» → «{new_text}»"
             cached["summary"] = new_text
+            self._schedule_recent_save()
             await self._post_event(
                 account,
                 cached["thread_id"],

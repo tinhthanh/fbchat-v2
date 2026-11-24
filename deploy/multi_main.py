@@ -106,6 +106,8 @@ TRACE_ACCOUNTS = {
     if name.strip()
 }
 TRACE_DIR = ACCOUNTS_DIR.parent / "trace"
+# Bộ nhớ trích dẫn của gateway link (tóm tắt tin gần nhất), sống qua lần khởi động lại.
+QUOTES_FILE = ACCOUNTS_DIR.parent / "quotes.json"
 TRACE_MAX_BYTES = 20 << 20
 # Tin không giải mã được thường tới lại ngay sau khi bridge xin gửi lại (tin
 # nhóm khi bot chưa có khoá nhóm của người gửi): chờ rồi mới đăng tin báo lỗi,
@@ -823,6 +825,8 @@ async def main() -> None:
     global _gateway
     async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         _gateway = GatewayLink.from_env(http_client, log)
+        if _gateway is not None:
+            _gateway.load_recent(QUOTES_FILE)
         if _gateway is None and not accounts:
             raise RuntimeError(
                 f"Không có tài khoản nào trong {ACCOUNTS_DIR} (cần <tên>/config.json)."
