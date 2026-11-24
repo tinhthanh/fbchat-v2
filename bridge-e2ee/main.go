@@ -517,6 +517,26 @@ func handle(req *request) {
 		}
 		ok(req.ID, map[string]interface{}{})
 
+	case "markE2EERead":
+		if client == nil {
+			fail(req.ID, fmt.Errorf("client not initialised"))
+			return
+		}
+		var p struct {
+			ChatJID    string   `json:"chatJid"`
+			SenderJID  string   `json:"senderJid"`
+			MessageIDs []string `json:"messageIds"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			fail(req.ID, err)
+			return
+		}
+		if err := client.MarkE2EERead(p.ChatJID, p.SenderJID, p.MessageIDs); err != nil {
+			fail(req.ID, err)
+			return
+		}
+		ok(req.ID, map[string]interface{}{})
+
 	case "sendE2EEAudio":
 		if client == nil {
 			fail(req.ID, fmt.Errorf("client not initialised"))

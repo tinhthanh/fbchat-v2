@@ -543,6 +543,8 @@ await actions.unsend_e2ee_message(
 await actions.send_typing_indicator(123456789, True)
 await actions.mark_read(123456789, 1710000000000)
 await actions.send_e2ee_typing("100012345678@msgr", True)
+# E2EE read receipt; groups (@g.us) also need the sender_jid of the message author.
+await actions.mark_e2ee_read("100012345678@msgr", ["mid.abc"])
 ```
 
 ### Encrypted image and audio

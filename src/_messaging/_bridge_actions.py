@@ -136,6 +136,34 @@ class BridgeActions:
         )
 
     @staticmethod
+    def _read_params(
+        chat_jid: str, message_ids: list[str], sender_jid: str
+    ) -> dict[str, Any]:
+        ids = [str(i) for i in message_ids if i]
+        if not ids:
+            raise ValueError("message_ids must contain at least one message id")
+        return {
+            "chatJid": normalize_chat_jid(chat_jid),
+            "senderJid": normalize_chat_jid(sender_jid) if sender_jid else "",
+            "messageIds": ids,
+        }
+
+    def mark_e2ee_read_blocking(
+        self, chat_jid: str, message_ids: list[str], sender_jid: str = ""
+    ) -> dict[str, Any]:
+        return self._call_blocking(
+            "markE2EERead", self._read_params(chat_jid, message_ids, sender_jid)
+        )
+
+    async def mark_e2ee_read(
+        self, chat_jid: str, message_ids: list[str], sender_jid: str = ""
+    ) -> dict[str, Any]:
+        """Biên nhận "đã xem" cho tin E2EE; sender_jid cần trong nhóm, bỏ trống ở chat 1-1."""
+        return await self._call(
+            "markE2EERead", self._read_params(chat_jid, message_ids, sender_jid)
+        )
+
+    @staticmethod
     def _audio_params(
         chat_jid: str,
         data: bytes,

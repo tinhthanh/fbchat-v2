@@ -1396,6 +1396,60 @@ class GatewayLink:
         )
         return 200, json.dumps({"ok": True})
 
+    def _latest_from_customer(self, account: str, thread_id: str) -> str:
+        """Id tin gần nhất của khách trong chat (bộ nhớ của bot, không tính tin chủ tài khoản)."""
+        prefix = f"{account}:"
+        for key in reversed(self._recent):
+            entry = self._recent[key]
+            if (
+                key.startswith(prefix)
+                and entry.get("thread_id") == thread_id
+                and entry.get("sender") != OWNER
+            ):
+                return key[len(prefix) :]
+        return ""
+
+    async def read(self, payload: dict[str, Any]) -> tuple[int, str]:
+        """Đánh dấu đã đọc tin của khách (POST /read): message_id trống thì tin gần nhất
+        bot còn nhớ. Canary dùng để kiểm "Đã xem" mà không cần mở Messenger."""
+        account = str(payload.get("account") or "")
+        bot = self.bots.get(account)
+        if bot is None:
+            return 404, "unknown account"
+        thread_id = str(payload.get("thread_id") or "")
+        kind, _, target = thread_id.partition(":")
+        if kind not in ("e2ee", "thread") or not target:
+            return 400, "invalid payload"
+        message_id = str(payload.get("message_id") or "") or self._latest_from_customer(
+            account, thread_id
+        )
+        if not message_id:
+            return 409, "Bot không còn nhớ tin nào của khách trong chat này."
+        bridge = _bridge_of(bot)
+        if bridge is None:
+            return 502, "bridge not ready"
+        cached = self._recent.get(f"{account}:{message_id}") or {}
+        try:
+            if kind == "e2ee":
+                # Nhóm cần JID người gửi tin; chat 1-1 thì để trống.
+                sender = cached.get("sender_jid") if cached.get("is_group") else ""
+                await bridge.call(
+                    "markE2EERead",
+                    {
+                        "chatJid": target,
+                        "senderJid": sender or "",
+                        "messageIds": [message_id],
+                    },
+                )
+            else:
+                await bridge.call(
+                    "markRead", {"threadId": int(target), "watermarkTs": 0}
+                )
+        except Exception as error:  # bridge/Facebook từ chối
+            self.log("gateway", f"❌ Đánh dấu đã đọc thất bại: {error}")
+            return 502, f"Facebook không nhận đánh dấu đã đọc: {error}"
+        return 200, json.dumps({"ok": True, "message_id": message_id})
+
     def _after_send(
         self, account: str, result: dict[str, Any], thread_id: str, summary: str
     ) -> str:
@@ -1436,6 +1490,7 @@ class GatewayLink:
                 "/edit",
                 "/resolve",
                 "/react",
+                "/read",
             )
             if not is_send and self.routes is None:
                 status, text = 404, "not found"
@@ -1466,9 +1521,11 @@ class GatewayLink:
                         "/edit",
                         "/resolve",
                         "/react",
+                        "/read",
                     ):
                         handler = {
                             "/react": self.react,
+                            "/read": self.read,
                             "/recall": self.recall,
                             "/edit": self.edit,
                             "/resolve": self.resolve,
