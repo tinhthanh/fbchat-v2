@@ -622,6 +622,36 @@ async def test_owner_message_note_skips_bot_echoes() -> None:
         events[0]["kind"] == "owner_message" and events[0]["thread_id"] == "e2ee:8@msgr"
     )
     assert events[0]["text"] == "chủ shop trả lời từ điện thoại"
+    assert "quote" not in events[0]
+
+
+@pytest.mark.asyncio
+async def test_owner_reply_with_quote_sends_the_quote() -> None:
+    """Chủ tài khoản trả lời trích dẫn từ điện thoại: ghi chú giữ dòng ↪ (24/11/2026)."""
+    link, calls = _recording_link()
+    bot = _Bot()
+    link.bots["acc1"] = bot  # type: ignore[assignment]
+    await link.forward(
+        "acc1",
+        bot,
+        {"messageID": "m1", "userID": "7", "body": "mèo nôn", "chatJid": "7@msgr"},
+    )
+    await link.forward_owner(
+        "acc1",
+        bot,
+        {
+            "messageID": "m2",
+            "userID": "100",
+            "body": "bé còn ăn được không?",
+            "chatJid": "7@msgr",
+            "raw": {"replyTo": {"messageId": "m1"}},
+        },
+    )
+    events = [c[1] for c in calls if c[0] == "/v1/event"]
+    assert len(events) == 1
+    assert events[0]["kind"] == "owner_message"
+    assert events[0]["text"] == "bé còn ăn được không?"
+    assert events[0]["quote"] == "Facebook 7: mèo nôn"
 
 
 @pytest.mark.asyncio

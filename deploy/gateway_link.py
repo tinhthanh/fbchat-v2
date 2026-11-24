@@ -944,6 +944,9 @@ class GatewayLink:
             return
         text, files = await self._collect(bot, message)
         if text or files:
+            # Trả lời trích dẫn từ điện thoại: gateway thêm dòng ↪ như tin của khách
+            # (gateway cũ bỏ qua trường này).
+            quote = self._quote(account, message)
             await self._post_event(
                 account,
                 thread_id,
@@ -953,6 +956,7 @@ class GatewayLink:
                 text,
                 str(message.get("messageID") or ""),
                 files,
+                {"quote": quote} if quote else None,
             )
 
     async def handle_meta(self, account: str, bot: _Bot, event: dict[str, Any]) -> None:
