@@ -260,6 +260,19 @@ def thread_ref(
     return f"thread:{thread_id}", is_group
 
 
+# URL trong lỗi của bridge có thể mang token ở query: bỏ cả URL khi ghi log.
+_URL_IN_ERROR = re.compile(r"[a-z][a-z0-9+.-]*://\S+", re.IGNORECASE)
+
+
+def error_detail(error: BaseException, limit: int = 300) -> str:
+    """Tên lỗi kèm nội dung đã bỏ URL, cắt ngắn: đủ để thấy mã lỗi Facebook
+    (vd. 1357004 khi token tải media hết hạn) mà không lộ đường dẫn có token."""
+    text = _URL_IN_ERROR.sub("<url>", str(error)).replace("\n", " ").strip()
+    if len(text) > limit:
+        text = text[:limit] + "…"
+    return f"{type(error).__name__}: {text}" if text else type(error).__name__
+
+
 def describe_attachment(attachment: dict[str, Any], *, with_url: bool = True) -> str:
     """Chữ hiển thị cho attachment không tải được hoặc không có file (vị trí, link)."""
     kind = attachment.get("type") or "attachment"
@@ -1318,7 +1331,9 @@ class GatewayLink:
             self._recent_replies.pop(message_id, None)
             if pending in self._pending:
                 self._pending.remove(pending)
-            self.log("gateway", f"❌ Gửi tin trả lời thất bại: {type(error).__name__}")
+            # Chi tiết lỗi (đã bỏ URL): canary Fanpage Web trượt từng đợt khi tải tệp
+            # lên chat thường, cần mã lỗi Facebook để biết vì sao (25/11/2026).
+            self.log("gateway", f"❌ Gửi tin trả lời thất bại: {error_detail(error)}")
             return 502, "send failed"
         if not (result.get("messageId") or result.get("id")):
             # Có thể đã gửi nhưng không xác nhận (deliveryStatus UNKNOWN): không

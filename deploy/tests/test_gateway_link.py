@@ -1781,3 +1781,18 @@ async def test_quote_memory_batches_writes(
         link._remember("acc1", f"m{i}", {"summary": str(i), "thread_id": "e2ee:7@msgr"})
     await asyncio.sleep(0.1)
     assert writes == 1
+
+
+def test_error_detail_drops_urls_and_truncates() -> None:
+    from gateway_link import error_detail
+
+    err = RuntimeError(
+        "sendImage: error in mercury upload: 1357004 Please reload "
+        "https://upload.facebook.com/ajax/mercury/upload.php?fb_dtsg=SECRET&x=1"
+    )
+    text = error_detail(err)
+    assert text.startswith("RuntimeError: sendImage: error in mercury upload: 1357004")
+    assert "SECRET" not in text and "facebook.com" not in text and "<url>" in text
+    assert error_detail(ValueError()) == "ValueError"
+    assert error_detail(RuntimeError("x" * 500)).endswith("…")
+    assert len(error_detail(RuntimeError("x" * 500))) < 330
