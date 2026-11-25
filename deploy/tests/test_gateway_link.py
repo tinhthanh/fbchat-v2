@@ -619,6 +619,34 @@ async def test_quote_uses_cached_text_for_e2ee_replies(
 
 
 @pytest.mark.asyncio
+async def test_quote_prefers_the_remembered_message_over_the_reply_snippet(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Chat thường: replyTo.text là ReplySnippet ("X đã trả lời bạn"), không phải tin gốc."""
+    monkeypatch.setattr(gateway_link._get_user_info, "func", _names)
+    link, calls = _recording_link()
+    bot = _Bot()
+    await link.forward(
+        "acc1", bot, {"messageID": "m1", "userID": "7", "body": "mèo nôn", "raw": {"threadId": 9001}}
+    )
+    await link.forward(
+        "acc1",
+        bot,
+        {
+            "messageID": "m2",
+            "userID": "8",
+            "body": "trả lời",
+            "raw": {
+                "threadId": 9001,
+                "replyTo": {"messageId": "m1", "text": "Tính Thành đã trả lời bạn"},
+            },
+        },
+    )
+    quotes = [c[1]["quote"] for c in calls if c[0] == "/v1/inbound"]
+    assert quotes[-1] == "User 7: mèo nôn"
+
+
+@pytest.mark.asyncio
 async def test_owner_message_note_skips_bot_echoes() -> None:
     link, calls = _recording_link()
     bot = _Bot()
