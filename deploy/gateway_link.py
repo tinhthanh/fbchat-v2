@@ -233,8 +233,15 @@ def facebook_user_id(raw: Any) -> str:
     return match.group(1) if match else ""
 
 
-def thread_ref(message: dict[str, Any]) -> tuple[str, bool] | None:
-    """Trả về (thread_id cho gateway, is_group) hoặc None nếu thiếu thông tin."""
+def thread_ref(
+    message: dict[str, Any], own_id: str = "", named: bool = False
+) -> tuple[str, bool] | None:
+    """Trả về (thread_id cho gateway, is_group) hoặc None nếu thiếu thông tin.
+
+    Chat thường mà bridge chưa biết loại thread (threadType 0: nhóm vừa tạo, bảng
+    LSDeleteThenInsertThread chưa tới phiên đang chạy; thử thật 25/11/2026): chat 1-1 có
+    threadKey là ID người kia, nên tin của người khác mà threadKey khác ID người gửi là nhóm.
+    Tin của chính tài khoản thì dựa vào `named` (bot đã biết tên thread: chỉ nhóm có tên)."""
     chat_jid = message.get("chatJid")
     if chat_jid:
         # Nhóm E2EE có JID dạng <id>@g.us; chat 1-1 là <id>@msgr.
@@ -244,7 +251,12 @@ def thread_ref(message: dict[str, Any]) -> tuple[str, bool] | None:
     if not thread_id:
         return None
     thread_type = raw.get("threadType") or 0
-    is_group = bool(thread_type) and thread_type not in ONE_TO_ONE_THREAD_TYPES
+    if thread_type:
+        is_group = thread_type not in ONE_TO_ONE_THREAD_TYPES
+    else:
+        sender = str(message.get("userID") or "")
+        from_other = bool(sender) and sender != own_id
+        is_group = named or (from_other and sender != str(thread_id))
     return f"thread:{thread_id}", is_group
 
 
@@ -988,11 +1000,20 @@ class GatewayLink:
         except httpx.HTTPError as error:
             self.log("gateway", f"❌ Không ghi được sự kiện {kind}: {error}")
 
+    def _thread_ref(
+        self, account: str, bot: _Bot, message: dict[str, Any]
+    ) -> tuple[str, bool] | None:
+        raw = _raw(message)
+        key = str(raw.get("threadId") or message.get("replyToID") or "")
+        named = bool(self._threads.get(f"{account}:{key}", {}).get("name"))
+        own_id = str(getattr(bot, "dataFB", {}).get("FacebookID") or "")
+        return thread_ref(message, own_id, named)
+
     async def forward_owner(
         self, account: str, bot: _Bot, message: dict[str, Any]
     ) -> None:
         """Tin chủ tài khoản gửi từ thiết bị khác thành ghi chú nội bộ."""
-        ref = thread_ref(message)
+        ref = self._thread_ref(account, bot, message)
         if ref is None:
             return
         thread_id, is_group = ref
@@ -1154,7 +1175,7 @@ class GatewayLink:
 
     async def forward(self, account: str, bot: _Bot, message: dict[str, Any]) -> None:
         """Chuyển một tin khách sang gateway; lỗi chỉ được ghi log."""
-        ref = thread_ref(message)
+        ref = self._thread_ref(account, bot, message)
         if ref is None:
             return
         text, files = await self._collect(bot, message)

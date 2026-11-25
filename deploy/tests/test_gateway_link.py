@@ -95,6 +95,39 @@ def test_thread_ref_distinguishes_e2ee_one_to_one_and_group() -> None:
     assert thread_ref({"raw": {}}) is None
 
 
+def test_thread_ref_new_regular_group_without_thread_type() -> None:
+    """Nhóm thường vừa tạo: bridge chưa có loại thread (thử thật 25/11/2026, bị coi là 1-1)."""
+    # Tin của người khác, threadKey khác ID người gửi: nhóm.
+    msg = {"userID": "615", "raw": {"threadId": 1162826139730460}}
+    assert thread_ref(msg, own_id="100") == ("thread:1162826139730460", True)
+    # Chat 1-1 thường: threadKey là ID người kia.
+    assert thread_ref({"userID": "615", "raw": {"threadId": 615}}, own_id="100") == (
+        "thread:615",
+        False,
+    )
+    # Tin của chính tài khoản trong chat chưa rõ loại: chỉ là nhóm khi đã biết tên thread.
+    own = {"userID": "100", "raw": {"threadId": 615}}
+    assert thread_ref(own, own_id="100") == ("thread:615", False)
+    group_own = {"userID": "100", "raw": {"threadId": 1162826139730460}}
+    assert thread_ref(group_own, own_id="100", named=True)[1] is True
+    # Loại thread đã biết thì giữ nguyên, kể cả khi gợi ý khác.
+    assert thread_ref({"userID": "615", "raw": {"threadId": 1, "threadType": 1}}, "100")[1] is False
+
+
+@pytest.mark.asyncio
+async def test_new_regular_group_goes_to_gateway_as_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(gateway_link._get_user_info, "func", _names)
+    link, calls = _recording_link()
+    bot = _Bot()
+    await link.forward(
+        "acc1", bot, {"messageID": "g1", "userID": "615", "body": "chào nhóm", "raw": {"threadId": 9001}}
+    )
+    inbound = [c[1] for c in calls if c[0] == "/v1/inbound"]
+    assert inbound[-1]["thread_id"] == "thread:9001" and inbound[-1]["is_group"] is True
+
+
 def test_describe_message_includes_attachments() -> None:
     message = {
         "body": "xem ảnh",
