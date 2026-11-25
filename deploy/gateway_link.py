@@ -963,7 +963,10 @@ class GatewayLink:
         if not isinstance(reply, dict):
             return ""
         cached = self._recent.get(f"{account}:{reply.get('messageId') or ''}")
-        text = reply.get("text") or (cached or {}).get("summary") or ""
+        # Nội dung bot đã nhớ trước: với chat thường, replyTo.text là ReplySnippet của LightSpeed,
+        # dòng tiêu đề kiểu "X đã trả lời bạn" chứ không phải tin được trích (mautrix-meta coi nó
+        # là relation snippet; thử thật 25/11/2026 trong nhóm thường).
+        text = (cached or {}).get("summary") or reply.get("text") or ""
         sender = (cached or {}).get("sender") or ""
         if not text:
             return "(tin được trả lời không còn trong bộ nhớ của bot)"
