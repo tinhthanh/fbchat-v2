@@ -275,12 +275,19 @@ def describe_attachment(attachment: dict[str, Any], *, with_url: bool = True) ->
             if p
         )
     if kind == "link":
+        # Bridge đặt tiêu đề thẻ vào fileName, phụ đề vào description: thẻ liên hệ
+        # là "Tên người" / "Facebook" (thử thật 25/11/2026), bỏ tiêu đề thì mất tên.
+        title = attachment.get("fileName") or ""
         lines = [
-            f"🔗 {attachment.get('description') or attachment.get('url') or 'Liên kết'}"
+            f"🔗 {title or attachment.get('description') or attachment.get('url') or 'Liên kết'}"
         ]
-        lines += [
-            str(v) for v in (attachment.get("url"), attachment.get("sourceText")) if v
-        ]
+        for value in (
+            attachment.get("description") if title else None,
+            attachment.get("url"),
+            attachment.get("sourceText"),
+        ):
+            if value and str(value) not in lines[0] and str(value) not in lines:
+                lines.append(str(value))
         return "\n".join(lines)
     label = MEDIA_LABELS.get(kind)
     if label is None:
