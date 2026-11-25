@@ -576,6 +576,19 @@ def test_describe_attachment_location_link_sticker() -> None:
         "sourceText": "shop.vn",
     }
     assert describe_attachment(link) == "🔗 Áo thun\nhttps://shop.vn/a\nshop.vn"
+    # Thẻ liên hệ: tiêu đề (tên người) ở fileName, phụ đề ở description.
+    contact = {
+        "type": "link",
+        "url": "http://m.me/100024107767037",
+        "fileName": "Huỳnh Tính Thành",
+        "description": "Facebook",
+    }
+    assert (
+        describe_attachment(contact)
+        == "🔗 Huỳnh Tính Thành\nFacebook\nhttp://m.me/100024107767037"
+    )
+    same = {"type": "link", "url": "https://shop.vn/a", "fileName": "https://shop.vn/a"}
+    assert describe_attachment(same) == "🔗 https://shop.vn/a"
     sticker = {"type": "sticker", "url": "https://cdn/s.png", "fileName": "s"}
     assert describe_attachment({"type": "sticker"}) == "🧩 Sticker"
     assert describe_attachment(sticker) == "🧩 Sticker"
