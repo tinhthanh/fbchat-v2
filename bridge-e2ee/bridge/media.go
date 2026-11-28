@@ -148,7 +148,7 @@ func (c *Client) UploadMedia(opts *UploadMediaOptions) (*UploadMediaResult, erro
 		IsVoiceClip: opts.IsVoice,
 	}
 
-	resp, err := c.Messagix.GetHTTP().SendMercuryUploadRequest(c.ctx, opts.ThreadID, media)
+	resp, err := c.mercuryUpload(opts.ThreadID, media)
 	if err != nil {
 		return nil, err
 	}
@@ -448,7 +448,7 @@ func (c *Client) SetGroupPhoto(opts *SetGroupPhotoOptions) error {
 		MediaData: opts.Data,
 	}
 
-	resp, err := c.Messagix.GetHTTP().SendMercuryUploadRequest(c.ctx, opts.ThreadID, media)
+	resp, err := c.mercuryUpload(opts.ThreadID, media)
 	if err != nil {
 		return fmt.Errorf("failed to upload group photo: %w", err)
 	}

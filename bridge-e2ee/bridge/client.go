@@ -78,10 +78,13 @@ type Client struct {
 	recentE2EEMessagesMu sync.Mutex
 	recentE2EESweep      int64
 	connectionStatusMu   sync.RWMutex
-	regularFailure       transportFailureState
-	e2eeFailure          transportFailureState
-	regularConnected     atomic.Bool
-	decryptFailures      *decryptFailures
+	// tokenRefreshMu, tokensRefreshedAt: reloading the page tokens for HTTP (reload_tokens.go).
+	tokenRefreshMu    sync.Mutex
+	tokensRefreshedAt time.Time
+	regularFailure    transportFailureState
+	e2eeFailure       transportFailureState
+	regularConnected  atomic.Bool
+	decryptFailures   *decryptFailures
 }
 
 // ClientConfig for creating a new client
