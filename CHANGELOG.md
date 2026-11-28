@@ -9,6 +9,14 @@ phiên bản tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Bridge: Facebook trả `1357004` ("vui lòng tải lại trang", `ErrPleaseReloadPage`) khi tải ảnh, tệp,
+  tin thoại của chat thường lúc token trang (`fb_dtsg`, `lsd`) đã cũ, thường từ ngày thứ ba sau khi bot
+  khởi động. Bridge nạp lại trang để lấy token mới cho HTTP (socket và E2EE giữ nguyên) rồi tải lại
+  một lần. / Bridge: on Facebook's `1357004` ("please reload the page") for a regular-chat media
+  upload with stale page tokens, the bridge reloads the page tokens for HTTP only and uploads once more.
+
 ### Added
 
 - Bridge RPC `getCookies` trả cookie hiện tại của phiên (messagix cập nhật từ
